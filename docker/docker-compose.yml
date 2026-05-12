@@ -62,6 +62,26 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    ollama:
+    image: ollama/ollama:latest
+    container_name: sspm_ollama
+    restart: always
+    networks:
+      - sspm_net
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "ollama serve & sleep 5 && ollama pull llama3.2 && wait"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    deploy:
+      resources:
+        limits:
+          memory: 3g   # hard cap so it doesn't starve postgres/neo4j
 
   # ── SSPM API ─────────────────────────────────────────────────────────────────
   api:
@@ -99,7 +119,8 @@ volumes:
   neo4j_data:
   neo4j_logs:
   redis_data:
-
+  ollama_data:
+  
 networks:
   sspm_net:
     driver: bridge
