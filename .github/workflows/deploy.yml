@@ -88,11 +88,17 @@ jobs:
     steps:
       - name: Deploy to Droplet via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          # Re-export under GHCR_TOKEN so it isn't stripped by Actions' secret
+          # masking, which silently empties GITHUB_TOKEN in child processes.
+          GHCR_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR:      ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         with:
           host:     ${{ secrets.DROPLET_IP }}
           username: sspm
           key:      ${{ secrets.SSH_PRIVATE_KEY }}
-          envs:     GITHUB_ACTOR,GITHUB_REPOSITORY,GITHUB_TOKEN
+          envs:     GHCR_TOKEN,GITHUB_ACTOR,GITHUB_REPOSITORY
           script: |
             set -e
             cd /opt/sspm
@@ -100,8 +106,8 @@ jobs:
             # Fetch latest compose file and scripts
             git pull origin main
 
-            # Authenticate with GHCR using the workflow's GITHUB_TOKEN
-            echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+            # Authenticate with GHCR
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
             # Pull the newly built image
             docker pull ghcr.io/$GITHUB_REPOSITORY:latest
