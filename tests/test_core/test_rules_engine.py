@@ -1,119 +1,236 @@
-"""Unit tests for the detection rules engine."""
+"""
+Tests for the detection rules engine.
+
+The current architecture splits rule evaluation into two layers:
+  - core/normalized_rules_engine.py  — pure-Python condition evaluator (no DB needed)
+  - core/rules_engine.py             — DB/Neo4j orchestrator (requires live session)
+
+These tests cover the condition evaluator directly, which is where the detection
+logic lives.  The orchestrator is integration-tested via the scan pipeline tests.
+"""
 import pytest
-from core.rules_engine import RulesEngine, RuleResult
+from unittest.mock import MagicMock
+
+from core.normalized_rules_engine import _eval_condition, _eval_leaf, _get_field
+from core.rules_engine import RulesEngine
 
 
-def _repo(name: str, **overrides) -> dict:
-    base = {
-        "entity_type": "resource",
-        "platform": "github",
-        "platform_id": "100",
-        "name": name,
-        "resource_subtype": "repository",
-        "is_public": False,
-        "metadata": {
-            "branch_protected": True,
-            "allow_force_pushes": False,
-            "allow_deletions": False,
-            "required_pr_reviews": True,
-            "required_status_checks": True,
-            "enforce_admins": True,
-        },
-    }
-    # Allow overriding nested metadata
-    if "metadata" in overrides:
-        base["metadata"].update(overrides.pop("metadata"))
-    base.update(overrides)
-    return base
+# ── _get_field ────────────────────────────────────────────────────────────────
+
+class TestGetField:
+    def test_top_level_present(self):
+        val, exists = _get_field({"foo": "bar"}, "foo")
+        assert exists is True
+        assert val == "bar"
+
+    def test_top_level_missing(self):
+        val, exists = _get_field({}, "foo")
+        assert exists is False
+        assert val is None
+
+    def test_nested_dot_notation(self):
+        val, exists = _get_field({"attributes": {"mfa_enabled": False}}, "attributes.mfa_enabled")
+        assert exists is True
+        assert val is False
+
+    def test_nested_missing_parent(self):
+        _, exists = _get_field({}, "attributes.mfa_enabled")
+        assert exists is False
+
+    def test_nested_parent_not_dict(self):
+        _, exists = _get_field({"attributes": "string"}, "attributes.mfa_enabled")
+        assert exists is False
 
 
-def _user(username: str, two_fa: bool | None = True) -> dict:
-    return {
-        "entity_type": "user",
-        "platform": "github",
-        "platform_id": "1",
-        "username": username,
-        "metadata": {"two_factor_enabled": two_fa, "github_role": "member"},
-    }
+# ── _eval_leaf — operator coverage ───────────────────────────────────────────
+
+class TestEvalLeaf:
+    def _cond(self, field, operator, value=None):
+        c = {"field": field, "operator": operator}
+        if value is not None:
+            c["value"] = value
+        return c
+
+    def test_equals_match(self):
+        assert _eval_leaf({"status": "active"}, self._cond("status", "equals", "active"))
+
+    def test_equals_no_match(self):
+        assert not _eval_leaf({"status": "inactive"}, self._cond("status", "equals", "active"))
+
+    def test_not_equals(self):
+        assert _eval_leaf({"role": "viewer"}, self._cond("role", "not_equals", "admin"))
+
+    def test_exists_present(self):
+        assert _eval_leaf({"token": "abc"}, self._cond("token", "exists"))
+
+    def test_exists_missing(self):
+        assert not _eval_leaf({}, self._cond("token", "exists"))
+
+    def test_exists_none_value(self):
+        assert not _eval_leaf({"token": None}, self._cond("token", "exists"))
+
+    def test_not_exists(self):
+        assert _eval_leaf({}, self._cond("token", "not_exists"))
+
+    def test_is_empty_none(self):
+        assert _eval_leaf({"x": None}, self._cond("x", "is_empty"))
+
+    def test_is_empty_empty_list(self):
+        assert _eval_leaf({"x": []}, self._cond("x", "is_empty"))
+
+    def test_is_empty_nonempty_list(self):
+        assert not _eval_leaf({"x": [1]}, self._cond("x", "is_empty"))
+
+    def test_is_empty_missing_key(self):
+        assert _eval_leaf({}, self._cond("missing", "is_empty"))
+
+    def test_contains_match(self):
+        assert _eval_leaf({"roles": ["admin", "viewer"]}, self._cond("roles", "contains", "admin"))
+
+    def test_contains_no_match(self):
+        assert not _eval_leaf({"roles": ["viewer"]}, self._cond("roles", "contains", "admin"))
+
+    def test_contains_non_list(self):
+        assert not _eval_leaf({"roles": "admin"}, self._cond("roles", "contains", "admin"))
+
+    def test_older_than_days_triggers(self):
+        # 2000-01-01 is definitely more than 90 days ago
+        assert _eval_leaf(
+            {"last_login": "2000-01-01T00:00:00Z"},
+            {"field": "last_login", "operator": "older_than_days", "value": 90},
+        )
+
+    def test_older_than_days_recent_no_trigger(self):
+        from datetime import datetime, timezone, timedelta
+        recent = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        assert not _eval_leaf(
+            {"last_login": recent},
+            {"field": "last_login", "operator": "older_than_days", "value": 90},
+        )
+
+    def test_older_than_days_missing_field(self):
+        assert not _eval_leaf({}, {"field": "last_login", "operator": "older_than_days", "value": 90})
+
+    def test_unknown_operator_returns_false(self):
+        assert not _eval_leaf({"x": 1}, self._cond("x", "bogus_op", 1))
 
 
-class TestRulesEngine:
+# ── _eval_condition — compound logic ─────────────────────────────────────────
 
-    def setup_method(self):
-        self.engine = RulesEngine()
+class TestEvalCondition:
+    def test_all_passes(self):
+        cond = {"all": [
+            {"field": "attributes.mfa_enabled", "operator": "equals", "value": False},
+            {"field": "attributes.is_active",   "operator": "equals", "value": True},
+        ]}
+        data = {"attributes": {"mfa_enabled": False, "is_active": True}}
+        assert _eval_condition(data, cond)
 
-    def _find(self, findings: list[RuleResult], rule_id: str) -> list[RuleResult]:
-        return [f for f in findings if f.rule_id == rule_id]
+    def test_all_fails_one(self):
+        cond = {"all": [
+            {"field": "attributes.mfa_enabled", "operator": "equals", "value": False},
+            {"field": "attributes.is_active",   "operator": "equals", "value": True},
+        ]}
+        data = {"attributes": {"mfa_enabled": True, "is_active": True}}
+        assert not _eval_condition(data, cond)
 
-    # ── GH-001 public repo ────────────────────────────────────────────────────
+    def test_any_one_match(self):
+        cond = {"any": [
+            {"field": "attributes.is_admin",    "operator": "equals", "value": True},
+            {"field": "attributes.mfa_enabled", "operator": "equals", "value": False},
+        ]}
+        data = {"attributes": {"is_admin": False, "mfa_enabled": False}}
+        assert _eval_condition(data, cond)
 
-    def test_gh001_public_repo_triggers(self):
-        entities = [_repo("public-repo", is_public=True)]
-        findings = self.engine.run(entities)
-        assert self._find(findings, "GH-001")
+    def test_any_no_match(self):
+        cond = {"any": [
+            {"field": "attributes.is_admin",    "operator": "equals", "value": True},
+            {"field": "attributes.mfa_enabled", "operator": "equals", "value": False},
+        ]}
+        data = {"attributes": {"is_admin": False, "mfa_enabled": True}}
+        assert not _eval_condition(data, cond)
 
-    def test_gh001_private_repo_no_trigger(self):
-        entities = [_repo("private-repo", is_public=False)]
-        findings = self.engine.run(entities)
-        assert not self._find(findings, "GH-001")
+    def test_nested_all_inside_any(self):
+        cond = {"any": [
+            {"all": [
+                {"field": "attributes.is_admin",    "operator": "equals", "value": True},
+                {"field": "attributes.mfa_enabled", "operator": "equals", "value": False},
+            ]},
+            {"field": "attributes.is_external", "operator": "equals", "value": True},
+        ]}
+        # Second branch matches (external user)
+        data = {"attributes": {"is_admin": False, "mfa_enabled": True, "is_external": True}}
+        assert _eval_condition(data, cond)
 
-    # ── GH-002 missing branch protection ─────────────────────────────────────
+    def test_unknown_node_returns_false(self):
+        assert not _eval_condition({}, {"unknown_key": []})
 
-    def test_gh002_no_protection_triggers(self):
-        entities = [_repo("unprotected", metadata={"branch_protected": False})]
-        findings = self.engine.run(entities)
-        assert self._find(findings, "GH-002")
 
-    def test_gh002_protected_no_trigger(self):
-        entities = [_repo("protected")]
-        findings = self.engine.run(entities)
-        assert not self._find(findings, "GH-002")
+# ── Realistic detection scenarios ────────────────────────────────────────────
 
-    # ── GH-003 force pushes ───────────────────────────────────────────────────
+class TestDetectionScenarios:
+    """
+    Simulate what the YAML rules do: define a condition dict, feed entity data,
+    assert the match result.  These mirror the GH-* rule intent without
+    needing the database.
+    """
 
-    def test_gh003_force_pushes_triggers(self):
-        entities = [_repo("fp-repo", metadata={"branch_protected": True, "allow_force_pushes": True})]
-        findings = self.engine.run(entities)
-        assert self._find(findings, "GH-003")
+    # Simulates GH-001: public repository
+    def test_public_repo_detected(self):
+        cond = {"field": "attributes.is_public", "operator": "equals", "value": True}
+        assert _eval_condition({"attributes": {"is_public": True}}, cond)
+        assert not _eval_condition({"attributes": {"is_public": False}}, cond)
 
-    def test_gh003_no_force_pushes_no_trigger(self):
-        entities = [_repo("ok-repo")]
-        findings = self.engine.run(entities)
-        assert not self._find(findings, "GH-003")
+    # Simulates GH-002: no branch protection
+    def test_no_branch_protection(self):
+        cond = {"field": "attributes.branch_protected", "operator": "equals", "value": False}
+        assert _eval_condition({"attributes": {"branch_protected": False}}, cond)
+        assert not _eval_condition({"attributes": {"branch_protected": True}}, cond)
 
-    # ── GH-004 no PR reviews ─────────────────────────────────────────────────
+    # Simulates GH-003: force pushes allowed
+    def test_force_pushes_allowed(self):
+        cond = {"all": [
+            {"field": "attributes.branch_protected",   "operator": "equals", "value": True},
+            {"field": "attributes.allow_force_pushes", "operator": "equals", "value": True},
+        ]}
+        assert _eval_condition(
+            {"attributes": {"branch_protected": True, "allow_force_pushes": True}}, cond
+        )
+        assert not _eval_condition(
+            {"attributes": {"branch_protected": True, "allow_force_pushes": False}}, cond
+        )
 
-    def test_gh004_no_reviews_triggers(self):
-        entities = [_repo("no-review", metadata={"branch_protected": True, "required_pr_reviews": False})]
-        findings = self.engine.run(entities)
-        assert self._find(findings, "GH-004")
+    # Simulates GH-005: 2FA not enabled (explicitly False — None = unknown, skip)
+    def test_2fa_disabled_detected(self):
+        cond = {"field": "attributes.mfa_enabled", "operator": "equals", "value": False}
+        assert _eval_condition({"attributes": {"mfa_enabled": False}}, cond)
+        assert not _eval_condition({"attributes": {"mfa_enabled": True}}, cond)
+        # None (unknown) must NOT trigger a false positive
+        assert not _eval_condition({"attributes": {"mfa_enabled": None}}, cond)
 
-    # ── GH-005 no 2FA ─────────────────────────────────────────────────────────
 
-    def test_gh005_no_2fa_triggers(self):
-        entities = [_user("bob", two_fa=False)]
-        findings = self.engine.run(entities)
-        assert self._find(findings, "GH-005")
+# ── RulesEngine constructor smoke test ────────────────────────────────────────
 
-    def test_gh005_2fa_enabled_no_trigger(self):
-        entities = [_user("alice", two_fa=True)]
-        findings = self.engine.run(entities)
-        assert not self._find(findings, "GH-005")
+class TestRulesEngineConstruct:
+    def test_instantiates_with_mocked_deps(self):
+        db    = MagicMock()
+        graph = MagicMock()
+        engine = RulesEngine(db=db, graph=graph, connector_id="c1", connector_name="Test")
+        assert engine._connector_id == "c1"
+        assert engine._connector_name == "Test"
 
-    def test_gh005_2fa_unknown_no_trigger(self):
-        """None means we couldn't determine 2FA status – do not false-positive."""
-        entities = [_user("unknown", two_fa=None)]
-        findings = self.engine.run(entities)
-        assert not self._find(findings, "GH-005")
+    def test_extract_identifier_named_field(self):
+        row = {"repository": "my-repo", "other": "val"}
+        assert RulesEngine._extract_identifier(row, "repository") == "my-repo"
 
-    # ── Severity fields ───────────────────────────────────────────────────────
+    def test_extract_identifier_fallback(self):
+        row = {"other": "val"}
+        result = RulesEngine._extract_identifier(row, "missing_field")
+        assert result == "val"
 
-    def test_finding_has_required_fields(self):
-        entities = [_repo("bad-repo", is_public=True, metadata={"branch_protected": False})]
-        findings = self.engine.run(entities)
-        for f in findings:
-            assert f.rule_id
-            assert f.severity in ("critical", "high", "medium", "low", "info")
-            assert f.title
-            assert f.description
-            assert f.remediation
+    def test_infer_resource_type_known(self):
+        assert RulesEngine._infer_resource_type("repository") == "repository"
+        assert RulesEngine._infer_resource_type("user") == "user"
+
+    def test_infer_resource_type_unknown_passthrough(self):
+        assert RulesEngine._infer_resource_type("custom_field") == "custom_field"
