@@ -45,6 +45,32 @@ def get_rule(rule_id: str, db: Session = Depends(get_db)) -> dict:
     return _rule_to_dict(rule, include_query=True)
 
 
+@router.post("/reload", response_model=dict[str, Any])
+def reload_rules(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Reload all rule YAML files from disk into the DB (upsert). Safe to call repeatedly."""
+    import os
+    from pathlib import Path
+    from core.rules_loader import RulesLoader
+
+    rules_dir = Path(os.getenv("RULES_DIR", "/app/rules"))
+    if not rules_dir.exists():
+        raise HTTPException(status_code=500, detail=f"Rules directory not found: {rules_dir}")
+
+    loader = RulesLoader(db)
+    totals: dict[str, Any] = {"inserted": 0, "updated": 0, "errors": 0, "files": []}
+    for yaml_file in sorted(rules_dir.glob("*.yaml")):
+        try:
+            result = loader.load_from_yaml(str(yaml_file))
+            totals["inserted"] += result["inserted"]
+            totals["updated"] += result["updated"]
+            totals["errors"] += result["errors"]
+            totals["files"].append({"file": yaml_file.name, **result})
+        except Exception as exc:
+            totals["errors"] += 1
+            totals["files"].append({"file": yaml_file.name, "error": str(exc)})
+    return totals
+
+
 @router.post("/run", response_model=dict[str, Any])
 def run_all_rules(
     platform: str | None = Query(None, description="Filter by platform, e.g. 'github'"),

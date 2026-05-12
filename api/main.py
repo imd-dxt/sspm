@@ -58,8 +58,44 @@ def _run_scheduled_syncs() -> None:
         log.warning("scheduler_error", extra={"error": str(exc)})
 
 
+def _seed_rules() -> None:
+    """Load all rule YAML files into the DB on startup (idempotent upsert)."""
+    import os
+    from pathlib import Path
+    from database.session import SessionLocal
+    from core.rules_loader import RulesLoader
+
+    rules_dir = Path(os.getenv("RULES_DIR", "/app/rules"))
+    if not rules_dir.exists():
+        log.warning("rules_dir_not_found", rules_dir=str(rules_dir))
+        return
+
+    yaml_files = list(rules_dir.glob("*.yaml"))
+    if not yaml_files:
+        log.warning("no_rule_yaml_files", rules_dir=str(rules_dir))
+        return
+
+    db = SessionLocal()
+    try:
+        loader = RulesLoader(db)
+        for yaml_file in sorted(yaml_files):
+            try:
+                result = loader.load_from_yaml(str(yaml_file))
+                log.info("rules_seeded", file=yaml_file.name, **result)
+            except Exception as exc:
+                log.warning("rules_seed_failed", file=yaml_file.name, error=str(exc))
+    finally:
+        db.close()
+
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    # Seed rules from YAML on every startup (upsert — safe to run repeatedly)
+    try:
+        _seed_rules()
+    except Exception as exc:
+        log.warning("rules_seed_error", error=str(exc))
+
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         scheduler = BackgroundScheduler()
