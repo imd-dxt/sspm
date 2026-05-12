@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Production base — no hardcoded secrets, no dev ports, no build context.
 # All ${VAR} references are substituted from /opt/sspm/.env at deploy time.
 # Local dev overrides live in docker-compose.override.yml (git-ignored).
