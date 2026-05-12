@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv\\\\Scripts\\\\python.exe -m scripts.load_salesforce_rules)",
+      "Bash(python -m scripts.load_salesforce_rules)",
+      "Bash(python -c \"import yaml; d=yaml.safe_load\\(open\\('salesforce_security_rules.yaml',encoding='utf-8'\\)\\); rules=d.get\\('rules',[]\\); print\\(f'Rules in YAML: {len\\(rules\\)}'\\); [print\\(r['id']\\) for r in rules]\")",
+      "Bash(python -c ':*)",
+      "Bash(python -c \"from connectors.entraid_connector import EntraIDConnector; print\\('connector OK'\\)\")",
+      "Bash(python -c \"from core.rules_loader import RulesLoader, ENTRAID_CORRECTED_QUERIES; print\\(f'rules_loader OK — {len\\(ENTRAID_CORRECTED_QUERIES\\)} Entra ID queries'\\)\")",
+      "Bash(python -c \"from core.graph_manager import GraphManager; print\\('graph_manager OK'\\)\")",
+      "Bash(python -m scripts.load_entraid_rules --dry-run)",
+      "Bash(python -c \"from api.routes.connectors import router; print\\('connectors route OK'\\)\")",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(timeout 12 npx vite build --mode development)",
+      "Bash(npm run:*)",
+      "Bash(python -m scripts.migrate_v2)"
+    ]
+  }
+}

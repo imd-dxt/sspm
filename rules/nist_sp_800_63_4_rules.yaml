@@ -1,0 +1,1041 @@
+rule_pack:
+  id: nist-sp-800-63-4-digital-identity
+  name: NIST SP 800-63-4 Digital Identity Rules
+  version: 1.0.0
+  status: draft
+  source:
+    framework: NIST SP 800-63-4
+    publication_date: 2025-08-01
+    documents:
+      - id: SP800-63-4
+        title: Digital Identity Guidelines
+        url: https://pages.nist.gov/800-63-4/sp800-63.html
+      - id: SP800-63A-4
+        title: Identity Proofing and Enrollment
+        url: https://pages.nist.gov/800-63-4/sp800-63a.html
+      - id: SP800-63B-4
+        title: Authentication and Authenticator Management
+        url: https://pages.nist.gov/800-63-4/sp800-63b.html
+      - id: SP800-63C-4
+        title: Federation and Assertions
+        url: https://pages.nist.gov/800-63-4/sp800-63c.html
+  description: >
+    SSPM-oriented rule pack derived from NIST SP 800-63-4, 800-63A-4,
+    800-63B-4, and 800-63C-4. Rules are intended to run against a normalized
+    identity, authentication, session, password-policy, and federation data model.
+  assumptions:
+    - These rules are implementation-oriented checks, not a complete legal compliance assessment.
+    - Field names are examples and should be mapped to your normalized SSPM schema.
+    - Rules with requirement_level SHOULD are included because they are useful security posture checks.
+  normalized_resource_types:
+    - identity_service
+    - identity_proofing_policy
+    - authentication_policy
+    - password_policy
+    - authenticator_policy
+    - session_policy
+    - federation_policy
+    - assertion_policy
+    - relying_party
+    - identity_provider
+
+rules:
+  - id: nist-63-001-select-assurance-levels
+    title: Digital identity service must define applicable IAL, AAL, and FAL
+    category: digital_identity_risk_management
+    source_refs:
+      - document: SP800-63-4
+        section: 3
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: identity_service
+    condition:
+      any:
+        - field: attributes.ial
+          operator: not_exists
+        - field: attributes.aal
+          operator: not_exists
+        - field: attributes.uses_federation
+          operator: equals
+          value: true
+          then:
+            field: attributes.fal
+            operator: not_exists
+    remediation:
+      message: Define risk-based IAL, AAL, and, when federation is used, FAL for the service.
+      steps:
+        - Perform a digital identity risk assessment.
+        - Select IAL for identity proofing, AAL for authentication, and FAL for federation.
+        - Store selected levels in the service configuration and enforce them in policy.
+
+  - id: nist-63b-001-personal-info-requires-aal2
+    title: Online access to personal information must require at least AAL2
+    category: authentication_assurance
+    source_refs:
+      - document: SP800-63B-4
+        section: 2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: authentication_policy
+    condition:
+      all:
+        - field: attributes.personal_information_available_online
+          operator: equals
+          value: true
+        - field: attributes.required_aal
+          operator: less_than
+          value: 2
+    remediation:
+      message: Require AAL2 or higher when personal information is made available online.
+      steps:
+        - Update the application or IdP policy to require AAL2 or higher.
+        - Require MFA with two distinct authentication factors.
+        - Re-test access to personal information endpoints.
+
+  - id: nist-63b-002-aal1-authenticated-protected-channel
+    title: AAL1 authentication must use authenticated protected channels
+    category: authentication_protocol
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.1.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: authentication_policy
+    condition:
+      all:
+        - field: attributes.required_aal
+          operator: greater_or_equal
+          value: 1
+        - field: attributes.authenticated_protected_channel
+          operator: not_equals
+          value: true
+    remediation:
+      message: Enforce authenticated protected channels for authentication traffic.
+      steps:
+        - Require HTTPS/TLS for all login and authenticator flows.
+        - Disable plaintext HTTP for authentication endpoints.
+        - Verify redirect and callback URLs use HTTPS.
+
+  - id: nist-63b-003-aal2-requires-two-factors
+    title: AAL2 must require proof of two distinct authentication factors
+    category: authentication_assurance
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.2
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: authentication_policy
+    condition:
+      all:
+        - field: attributes.required_aal
+          operator: equals
+          value: 2
+        - field: attributes.distinct_authentication_factors_required
+          operator: less_than
+          value: 2
+    remediation:
+      message: Configure the policy to require two distinct authentication factors for AAL2.
+      steps:
+        - Require either a multi-factor authenticator or two separate factors.
+        - Ensure one factor is possession-based when combining single-factor authenticators.
+        - Remove password-only access paths for AAL2 applications.
+
+  - id: nist-63b-004-aal2-offer-phishing-resistant-option
+    title: AAL2 verifier must offer at least one phishing-resistant authentication option
+    category: authentication_assurance
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.2.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: authentication_policy
+    condition:
+      all:
+        - field: attributes.required_aal
+          operator: equals
+          value: 2
+        - field: attributes.phishing_resistant_option_available
+          operator: not_equals
+          value: true
+    remediation:
+      message: Offer at least one phishing-resistant authentication option for AAL2.
+      steps:
+        - Enable FIDO2/WebAuthn passkeys, PIV/CAC, or another phishing-resistant method.
+        - Make the method available in the IdP authentication policy.
+        - Confirm users can enroll and authenticate with the phishing-resistant option.
+
+  - id: nist-63b-005-federal-workforce-phishing-resistant-required
+    title: Federal workforce access must require phishing-resistant authentication
+    category: authentication_assurance
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.2.2
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: authentication_policy
+    condition:
+      all:
+        - field: attributes.organization_context
+          operator: equals
+          value: federal_agency
+        - field: attributes.subject_group
+          operator: in
+          value:
+            - staff
+            - contractors
+            - partners
+        - field: attributes.phishing_resistant_authentication_required
+          operator: not_equals
+          value: true
+    remediation:
+      message: Require phishing-resistant authentication for staff, contractors, and partners.
+      steps:
+        - Update conditional access or IdP policy to require phishing-resistant methods.
+        - Target staff, contractors, and partner access to federal information systems.
+        - Monitor exceptions and migrate remaining users.
+
+  - id: nist-63b-006-aal3-requires-phishing-resistant-non-exportable-key
+    title: AAL3 must use phishing-resistant cryptographic authentication with non-exportable keys
+    category: authentication_assurance
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.3
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: authenticator_policy
+    condition:
+      all:
+        - field: attributes.required_aal
+          operator: equals
+          value: 3
+        - any:
+            - field: attributes.uses_public_key_cryptography
+              operator: not_equals
+              value: true
+            - field: attributes.phishing_resistant
+              operator: not_equals
+              value: true
+            - field: attributes.private_key_exportable
+              operator: equals
+              value: true
+    remediation:
+      message: Use AAL3-compatible authenticators with public-key cryptography, phishing resistance, and non-exportable private keys.
+      steps:
+        - Require hardware-backed FIDO2, PIV/CAC, or equivalent cryptographic authenticators.
+        - Disable syncable/exportable authenticators for AAL3 flows.
+        - Verify private keys are protected in hardware or an isolated execution environment.
+
+  - id: nist-63b-007-aal3-disallow-syncable-authenticators
+    title: Syncable authenticators must not be used at AAL3
+    category: authenticator_management
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.3.2
+    requirement_level: SHALL_NOT
+    severity: critical
+    scope:
+      resource_type: authenticator_policy
+    condition:
+      all:
+        - field: attributes.required_aal
+          operator: equals
+          value: 3
+        - field: attributes.syncable_authenticators_allowed
+          operator: equals
+          value: true
+    remediation:
+      message: Disable syncable authenticators for AAL3 authentication flows.
+      steps:
+        - Restrict AAL3 policies to non-exportable hardware-protected authenticators.
+        - Create a separate lower-assurance policy for syncable passkeys if needed.
+        - Re-enroll affected users with AAL3-compatible authenticators.
+
+  - id: nist-63b-008-aal2-session-timeouts
+    title: AAL2 session reauthentication timeouts should not exceed NIST guidance
+    category: session_management
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.2.3
+    requirement_level: SHOULD
+    severity: medium
+    scope:
+      resource_type: session_policy
+    condition:
+      all:
+        - field: attributes.aal
+          operator: equals
+          value: 2
+        - any:
+            - field: attributes.overall_reauthentication_timeout_hours
+              operator: greater_than
+              value: 24
+            - field: attributes.inactivity_timeout_minutes
+              operator: greater_than
+              value: 60
+    remediation:
+      message: Set AAL2 overall reauthentication timeout to 24 hours or less and inactivity timeout to 1 hour or less.
+      steps:
+        - Configure maximum session age to 24 hours or less.
+        - Configure idle timeout to 60 minutes or less.
+        - Validate that reauthentication is required after timeout.
+
+  - id: nist-63b-009-aal3-session-timeouts
+    title: AAL3 session reauthentication timeout must not exceed 12 hours
+    category: session_management
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.3.3
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: session_policy
+    condition:
+      all:
+        - field: attributes.aal
+          operator: equals
+          value: 3
+        - field: attributes.overall_reauthentication_timeout_hours
+          operator: greater_than
+          value: 12
+    remediation:
+      message: Set AAL3 overall reauthentication timeout to 12 hours or less.
+      steps:
+        - Configure maximum session age to 12 hours or less.
+        - Ensure AAL3 reauthentication uses the same requirements as initial AAL3 authentication.
+
+  - id: nist-63b-010-aal3-inactivity-timeout
+    title: AAL3 inactivity timeout should not exceed 15 minutes
+    category: session_management
+    source_refs:
+      - document: SP800-63B-4
+        section: 2.3.3
+    requirement_level: SHOULD
+    severity: medium
+    scope:
+      resource_type: session_policy
+    condition:
+      all:
+        - field: attributes.aal
+          operator: equals
+          value: 3
+        - field: attributes.inactivity_timeout_minutes
+          operator: greater_than
+          value: 15
+    remediation:
+      message: Set AAL3 idle timeout to 15 minutes or less.
+      steps:
+        - Configure idle timeout to 15 minutes or less.
+        - Require full AAL3 reauthentication after timeout.
+
+  - id: nist-63b-011-password-minimum-length
+    title: Password minimum length must meet NIST requirements
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: password_policy
+    condition:
+      any:
+        - all:
+            - field: attributes.password_used_as_single_factor
+              operator: equals
+              value: true
+            - field: attributes.minimum_length
+              operator: less_than
+              value: 15
+        - all:
+            - field: attributes.password_used_only_with_mfa
+              operator: equals
+              value: true
+            - field: attributes.minimum_length
+              operator: less_than
+              value: 8
+    remediation:
+      message: Require at least 15 characters for single-factor passwords and at least 8 characters when passwords are used only with MFA.
+      steps:
+        - Update the password policy minimum length.
+        - Separate single-factor and MFA-only policies if the SaaS supports it.
+        - Notify users before enforcing changes.
+
+  - id: nist-63b-012-password-maximum-length-at-least-64
+    title: Password maximum length should be at least 64 characters
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHOULD
+    severity: low
+    scope:
+      resource_type: password_policy
+    condition:
+      all:
+        - field: attributes.maximum_length
+          operator: exists
+        - field: attributes.maximum_length
+          operator: less_than
+          value: 64
+    remediation:
+      message: Permit passwords up to at least 64 characters.
+      steps:
+        - Increase maximum password length to 64 or more.
+        - Confirm long passphrases are accepted by the application and IdP.
+
+  - id: nist-63b-013-no-password-composition-rules
+    title: Password policies must not impose character composition rules
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL_NOT
+    severity: medium
+    scope:
+      resource_type: password_policy
+    condition:
+      any:
+        - field: attributes.requires_uppercase
+          operator: equals
+          value: true
+        - field: attributes.requires_lowercase
+          operator: equals
+          value: true
+        - field: attributes.requires_number
+          operator: equals
+          value: true
+        - field: attributes.requires_symbol
+          operator: equals
+          value: true
+    remediation:
+      message: Remove mandatory character composition requirements.
+      steps:
+        - Disable uppercase, lowercase, number, and symbol requirements.
+        - Prefer length, blocklist screening, and rate limiting controls.
+
+  - id: nist-63b-014-no-periodic-password-rotation
+    title: Passwords must not be rotated periodically without evidence of compromise
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL_NOT
+    severity: medium
+    scope:
+      resource_type: password_policy
+    condition:
+      all:
+        - field: attributes.periodic_password_rotation_enabled
+          operator: equals
+          value: true
+        - field: attributes.rotation_only_on_compromise
+          operator: not_equals
+          value: true
+    remediation:
+      message: Disable arbitrary periodic password expiration and require password change only when compromise is suspected or confirmed.
+      steps:
+        - Remove fixed password expiration intervals.
+        - Keep forced reset workflows for compromised authenticators.
+        - Use breach detection and risk signals to trigger resets.
+
+  - id: nist-63b-015-no-password-hints
+    title: Password hints accessible to unauthenticated users must not be allowed
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL_NOT
+    severity: medium
+    scope:
+      resource_type: password_policy
+    condition:
+      field: attributes.unauthenticated_password_hints_allowed
+      operator: equals
+      value: true
+    remediation:
+      message: Disable password hints visible before authentication.
+      steps:
+        - Remove password hint fields from account setup and recovery flows.
+        - Delete existing stored hints where feasible.
+
+  - id: nist-63b-016-no-kba-security-questions
+    title: Knowledge-based authentication and security questions must not be used for password setup
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL_NOT
+    severity: high
+    scope:
+      resource_type: password_policy
+    condition:
+      any:
+        - field: attributes.security_questions_enabled
+          operator: equals
+          value: true
+        - field: attributes.kba_prompt_enabled
+          operator: equals
+          value: true
+    remediation:
+      message: Remove KBA and security questions from password setup and recovery flows.
+      steps:
+        - Disable security questions in the IdP or SaaS settings.
+        - Replace KBA with stronger recovery methods.
+        - Review account recovery policy for phishing and social engineering risk.
+
+  - id: nist-63b-017-password-blocklist-required
+    title: Password changes must be checked against a blocklist
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: password_policy
+    condition:
+      field: attributes.compromised_or_common_password_blocklist_enabled
+      operator: not_equals
+      value: true
+    remediation:
+      message: Check prospective passwords against a blocklist of commonly used, expected, or compromised passwords.
+      steps:
+        - Enable breached-password and common-password screening.
+        - Include context-specific blocked values such as service name and username derivatives.
+        - Reject the full password value, not only substrings.
+
+  - id: nist-63b-018-password-rate-limiting-required
+    title: Password verifiers must rate-limit failed authentication attempts
+    category: authentication_protocol
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2 and 3.2.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: password_policy
+    condition:
+      any:
+        - field: attributes.failed_attempt_rate_limiting_enabled
+          operator: not_equals
+          value: true
+        - field: attributes.max_consecutive_failed_attempts
+          operator: greater_than
+          value: 100
+    remediation:
+      message: Enable rate limiting and keep consecutive failed attempts within NIST limits.
+      steps:
+        - Configure account or authenticator throttling for failed attempts.
+        - Disable or rebind authenticators after excessive failed attempts.
+        - Consider lower thresholds for high-risk applications.
+
+  - id: nist-63b-019-password-storage-resistant-to-offline-attacks
+    title: Passwords must be salted and hashed using a suitable password hashing scheme
+    category: credential_storage
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: password_policy
+    condition:
+      any:
+        - field: attributes.passwords_salted
+          operator: not_equals
+          value: true
+        - field: attributes.passwords_hashed
+          operator: not_equals
+          value: true
+        - field: attributes.password_hashing_scheme_suitable
+          operator: not_equals
+          value: true
+    remediation:
+      message: Store passwords in a form resistant to offline attacks using salts and a suitable password hashing scheme.
+      steps:
+        - Use a modern password hashing scheme with per-password salts and a work factor.
+        - Store salts and hashes per credential.
+        - Consider an additional keyed hashing or encryption layer with the key stored separately.
+
+  - id: nist-63b-020-allow-password-managers
+    title: Password managers and autofill must be allowed
+    category: password_policy
+    source_refs:
+      - document: SP800-63B-4
+        section: 3.1.1.2
+    requirement_level: SHALL
+    severity: low
+    scope:
+      resource_type: password_policy
+    condition:
+      any:
+        - field: attributes.password_managers_allowed
+          operator: not_equals
+          value: true
+        - field: attributes.autofill_allowed
+          operator: not_equals
+          value: true
+    remediation:
+      message: Allow password managers and autofill functionality.
+      steps:
+        - Remove controls that block password manager autofill.
+        - Permit paste where autofill APIs are unavailable.
+        - Test common enterprise password managers against the login form.
+
+  - id: nist-63b-021-session-secret-security
+    title: Session secrets must be securely established and protected
+    category: session_management
+    source_refs:
+      - document: SP800-63B-4
+        section: 5.1
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: session_policy
+    condition:
+      any:
+        - field: attributes.session_secret_generated_after_authentication
+          operator: not_equals
+          value: true
+        - field: attributes.session_secret_transmitted_over_protected_channel
+          operator: not_equals
+          value: true
+        - field: attributes.session_secret_available_to_intermediaries
+          operator: equals
+          value: true
+    remediation:
+      message: Generate session secrets during or immediately after authentication and protect them over authenticated channels.
+      steps:
+        - Generate session secrets only after successful authentication.
+        - Transmit session secrets only over authenticated protected channels.
+        - Prevent proxies, logs, and intermediaries from accessing session secrets.
+
+  - id: nist-63b-022-no-insecure-session-fallback
+    title: Authenticated sessions must not fall back to insecure transport
+    category: session_management
+    source_refs:
+      - document: SP800-63B-4
+        section: 5.1
+    requirement_level: SHALL_NOT
+    severity: critical
+    scope:
+      resource_type: session_policy
+    condition:
+      field: attributes.allows_http_after_authentication
+      operator: equals
+      value: true
+    remediation:
+      message: Prevent authenticated sessions from falling back from HTTPS to HTTP.
+      steps:
+        - Enforce HTTPS everywhere after authentication.
+        - Enable HSTS where applicable.
+        - Remove insecure callback, redirect, and asset URLs.
+
+  - id: nist-63b-023-secure-cookie-flags
+    title: Session cookies should use secure attributes
+    category: session_management
+    source_refs:
+      - document: SP800-63B-4
+        section: 5.1.1
+    requirement_level: SHOULD
+    severity: medium
+    scope:
+      resource_type: session_policy
+    condition:
+      any:
+        - field: attributes.cookie_secure_flag
+          operator: not_equals
+          value: true
+        - field: attributes.cookie_httponly_flag
+          operator: not_equals
+          value: true
+        - field: attributes.cookie_samesite
+          operator: not_in
+          value:
+            - Lax
+            - Strict
+        - field: attributes.cookie_contains_cleartext_personal_information
+          operator: equals
+          value: true
+    remediation:
+      message: Harden session cookies using Secure, HttpOnly, SameSite, narrow scope, and opaque values.
+      steps:
+        - Set Secure on all session cookies.
+        - Set HttpOnly where JavaScript access is not required.
+        - Set SameSite=Lax or SameSite=Strict.
+        - Ensure cookies contain opaque identifiers only, not cleartext personal information.
+
+  - id: nist-63a-001-ial1-evidence-and-core-attributes
+    title: IAL1 proofing must collect required identity evidence and core attributes
+    category: identity_proofing
+    source_refs:
+      - document: SP800-63A-4
+        section: 4.1
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: identity_proofing_policy
+    condition:
+      all:
+        - field: attributes.required_ial
+          operator: equals
+          value: 1
+        - any:
+            - field: attributes.collects_required_identity_evidence
+              operator: not_equals
+              value: true
+            - field: attributes.collects_core_attributes
+              operator: not_equals
+              value: true
+            - field: attributes.collects_government_identifier
+              operator: not_equals
+              value: true
+    remediation:
+      message: For IAL1, collect acceptable evidence, core attributes, and at least one government identifier.
+      steps:
+        - Require at least one acceptable evidence item for IAL1.
+        - Collect all core attributes defined by the CSP policy.
+        - Include at least one government identifier.
+
+  - id: nist-63a-002-ial2-proofing-pathway-required
+    title: IAL2 proofing must use an approved verification pathway
+    category: identity_proofing
+    source_refs:
+      - document: SP800-63A-4
+        section: 4.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: identity_proofing_policy
+    condition:
+      all:
+        - field: attributes.required_ial
+          operator: equals
+          value: 2
+        - field: attributes.ial2_verification_pathway
+          operator: not_in
+          value:
+            - non_biometric
+            - biometric
+            - digital_evidence
+    remediation:
+      message: Configure IAL2 identity proofing to use a supported verification pathway.
+      steps:
+        - Select non-biometric, biometric, or digital evidence pathway.
+        - Ensure evidence validation and identity verification controls match the selected pathway.
+        - Document the pathway in the CSP practice statement.
+
+  - id: nist-63a-003-ial3-onsite-attended-only
+    title: IAL3 proofing must be onsite attended
+    category: identity_proofing
+    source_refs:
+      - document: SP800-63A-4
+        section: 4.3
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: identity_proofing_policy
+    condition:
+      all:
+        - field: attributes.required_ial
+          operator: equals
+          value: 3
+        - field: attributes.proofing_type
+          operator: not_equals
+          value: onsite_attended
+    remediation:
+      message: IAL3 identity proofing must be delivered as onsite attended proofing.
+      steps:
+        - Require an onsite attended proofing process.
+        - Use a proofing agent who is co-located with the applicant or attending through a CSP-controlled kiosk or device.
+        - Disable remote unattended-only proofing for IAL3.
+
+  - id: nist-63a-004-ial3-evidence-collection
+    title: IAL3 proofing must collect sufficient evidence strength
+    category: identity_proofing
+    source_refs:
+      - document: SP800-63A-4
+        section: 4.3
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: identity_proofing_policy
+    condition:
+      all:
+        - field: attributes.required_ial
+          operator: equals
+          value: 3
+        - field: attributes.evidence_strength_combination
+          operator: not_in
+          value:
+            - one_fair_and_one_strong
+            - two_strong
+            - one_superior
+    remediation:
+      message: Configure IAL3 evidence collection to require one FAIR plus one STRONG, two STRONG, or one SUPERIOR evidence item.
+      steps:
+        - Update evidence requirements for IAL3 enrollment.
+        - Validate evidence strength classification in your proofing provider.
+        - Re-test enrollment with valid and invalid evidence combinations.
+
+  - id: nist-63c-001-fal2-rp-initiated
+    title: FAL2 federation transactions must be initiated by the relying party
+    category: federation
+    source_refs:
+      - document: SP800-63C-4
+        section: 2.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: federation_policy
+    condition:
+      all:
+        - field: attributes.required_fal
+          operator: greater_or_equal
+          value: 2
+        - field: attributes.transaction_initiator
+          operator: not_equals
+          value: relying_party
+    remediation:
+      message: Require RP-initiated federation for FAL2 and above.
+      steps:
+        - Disable IdP-initiated SSO for FAL2/FAL3 applications.
+        - Use authorization code or equivalent RP-initiated flows.
+        - Include an RP-generated nonce in federation requests.
+
+  - id: nist-63c-002-fal2-audience-restriction-and-replay-protection
+    title: FAL2 assertions must be audience-restricted and replay-protected
+    category: federation_assertions
+    source_refs:
+      - document: SP800-63C-4
+        section: 2.2
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: assertion_policy
+    condition:
+      all:
+        - field: attributes.required_fal
+          operator: greater_or_equal
+          value: 2
+        - any:
+            - field: attributes.audience_restricted_to_single_rp
+              operator: not_equals
+              value: true
+            - field: attributes.replay_protection_enabled
+              operator: not_equals
+              value: true
+    remediation:
+      message: Make assertions audience-restricted to a single RP and enforce replay protection.
+      steps:
+        - Set and validate the audience claim or equivalent SAML audience restriction.
+        - Include assertion identifiers and reject reused assertions.
+        - Keep assertion validity windows short.
+
+  - id: nist-63c-003-fal2-no-plaintext-pii-identifiers
+    title: FAL2 federated identifiers must not contain plaintext personal information
+    category: federation_privacy
+    source_refs:
+      - document: SP800-63C-4
+        section: 2.2
+    requirement_level: SHALL_NOT
+    severity: high
+    scope:
+      resource_type: federation_policy
+    condition:
+      all:
+        - field: attributes.required_fal
+          operator: greater_or_equal
+          value: 2
+        - field: attributes.federated_identifier_contains_plaintext_pii
+          operator: equals
+          value: true
+    remediation:
+      message: Replace plaintext personal identifiers with pairwise or opaque federated identifiers.
+      steps:
+        - Stop using email, employee number, username, or similar PII as federated identifier.
+        - Use pairwise pseudonymous identifiers where possible.
+        - Update RP account linking logic safely.
+
+  - id: nist-63c-004-fal2-preestablished-trust-agreement
+    title: FAL2 federation must use a pre-established trust agreement
+    category: federation
+    source_refs:
+      - document: SP800-63C-4
+        section: 2.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: federation_policy
+    condition:
+      all:
+        - field: attributes.required_fal
+          operator: greater_or_equal
+          value: 2
+        - field: attributes.preestablished_trust_agreement
+          operator: not_equals
+          value: true
+    remediation:
+      message: Establish a trust agreement before FAL2 or FAL3 federation transactions occur.
+      steps:
+        - Document IdP, RP, keys, attributes, assurance levels, and permitted flows.
+        - Approve and store the trust agreement before enabling federation.
+        - Review agreement scope periodically.
+
+  - id: nist-63c-005-fal2-nonce-required
+    title: FAL2 and above assertions must include RP nonce
+    category: federation_assertions
+    source_refs:
+      - document: SP800-63C-4
+        section: 3.9 and 3.10
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: assertion_policy
+    condition:
+      all:
+        - field: attributes.required_fal
+          operator: greater_or_equal
+          value: 2
+        - field: attributes.assertion_includes_rp_nonce
+          operator: not_equals
+          value: true
+    remediation:
+      message: Include a cryptographic nonce from the RP request in FAL2 and FAL3 assertions.
+      steps:
+        - Generate a cryptographic nonce in the RP request.
+        - Require the IdP or wallet to return the nonce in the assertion.
+        - Validate the nonce at the RP before accepting the assertion.
+
+  - id: nist-63c-006-fal3-holder-of-key-or-bound-authenticator
+    title: FAL3 assertions must require holder-of-key or bound authenticator verification
+    category: federation_assertions
+    source_refs:
+      - document: SP800-63C-4
+        section: 2.3 and 3.10
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: assertion_policy
+    condition:
+      all:
+        - field: attributes.required_fal
+          operator: equals
+          value: 3
+        - field: attributes.fal3_assertion_binding
+          operator: not_in
+          value:
+            - holder_of_key
+            - bound_authenticator
+    remediation:
+      message: Configure FAL3 assertions to include holder-of-key proof or require verification of a bound authenticator.
+      steps:
+        - Use holder-of-key assertions with phishing-resistant authenticators, or
+        - Bind an authenticator to the RP subscriber account and require verification.
+        - Validate the binding before creating an RP session.
+
+  - id: nist-63c-007-assertion-validation-required
+    title: Relying party must validate assertions before session creation
+    category: federation_assertions
+    source_refs:
+      - document: SP800-63C-4
+        section: 3.10.1
+    requirement_level: SHALL
+    severity: critical
+    scope:
+      resource_type: relying_party
+    condition:
+      any:
+        - field: attributes.validates_assertion_signature
+          operator: not_equals
+          value: true
+        - field: attributes.validates_assertion_issuer
+          operator: not_equals
+          value: true
+        - field: attributes.validates_assertion_time_window
+          operator: not_equals
+          value: true
+        - field: attributes.validates_assertion_audience
+          operator: not_equals
+          value: true
+        - field: attributes.validates_assertion_replay
+          operator: not_equals
+          value: true
+    remediation:
+      message: Validate assertion signature, issuer, time window, audience, and replay status before creating a session.
+      steps:
+        - Validate assertion signature against trusted IdP keys.
+        - Validate issuer and audience.
+        - Enforce not-before and expiration timestamps.
+        - Reject replayed assertion identifiers.
+
+  - id: nist-63c-008-back-channel-assertion-reference-controls
+    title: Back-channel assertion references must be single-use, RP-limited, time-limited, and unpredictable
+    category: federation_assertions
+    source_refs:
+      - document: SP800-63C-4
+        section: 3.10.2
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: assertion_policy
+    condition:
+      all:
+        - field: attributes.presentation_model
+          operator: equals
+          value: back_channel
+        - any:
+            - field: attributes.assertion_reference_single_use
+              operator: not_equals
+              value: true
+            - field: attributes.assertion_reference_limited_to_single_rp
+              operator: not_equals
+              value: true
+            - field: attributes.assertion_reference_validity_minutes
+              operator: greater_than
+              value: 5
+            - field: attributes.assertion_reference_predictable
+              operator: equals
+              value: true
+    remediation:
+      message: Harden assertion references used in back-channel presentation.
+      steps:
+        - Limit assertion references to one RP.
+        - Make assertion references single-use.
+        - Set validity to 5 minutes or less.
+        - Generate references with sufficient randomness.
+
+  - id: nist-63c-009-front-channel-protect-personal-info
+    title: Front-channel redirect assertions containing personal information must be encrypted
+    category: federation_privacy
+    source_refs:
+      - document: SP800-63C-4
+        section: 3.10.3
+    requirement_level: SHALL
+    severity: high
+    scope:
+      resource_type: assertion_policy
+    condition:
+      all:
+        - field: attributes.presentation_model
+          operator: equals
+          value: front_channel_redirect
+        - field: attributes.assertion_contains_personal_information
+          operator: equals
+          value: true
+        - field: attributes.personal_information_encrypted_in_assertion
+          operator: not_equals
+          value: true
+    remediation:
+      message: Encrypt personal information in front-channel redirect assertions.
+      steps:
+        - Prefer back-channel assertion presentation where possible.
+        - If front-channel redirects are used, encrypt personal information for the RP.
+        - Avoid placing PII-bearing assertions in URLs.

@@ -1,0 +1,590 @@
+version: "1.0"
+benchmark: "CIS GitHub Benchmark v1.2.0"
+category: "github"
+description: "Detection rules based on CIS GitHub Security Benchmark"
+
+rules:
+  # ============================================================================
+  # 1.1 Code Changes - Branch Protection & PR Requirements
+  # ============================================================================
+  
+  - id: "CIS-GH-1.1.3"
+    name: "Require two-person approval for code changes"
+    cis_control: "1.1.3"
+    severity: "high"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Ensure any change to code receives approval of two strongly authenticated users"
+    rationale: "Two-person approval prevents unauthorized or malicious code changes"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.branch_protection_enabled 
+         OR repo.required_approving_review_count < 2
+      RETURN repo.name as repository, 
+             repo.required_approving_review_count as current_approvals,
+             repo.visibility as visibility
+    remediation: |
+      1. Navigate to repository Settings → Branches
+      2. Edit branch protection rule for default branch
+      3. Enable "Require a pull request before merging"
+      4. Set "Required number of approvals before merging" to 2
+      5. Enable "Require review from Code Owners" if applicable
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "ISO27001-A.9.4"
+    
+  - id: "CIS-GH-1.1.4"
+    name: "Dismiss stale approvals when new commits are pushed"
+    cis_control: "1.1.4"
+    severity: "medium"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Ensure previous approvals are dismissed when updates are introduced"
+    rationale: "New commits after approval could introduce malicious changes"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.dismiss_stale_reviews
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Go to repository Settings → Branches
+      2. Edit branch protection rule
+      3. Enable "Dismiss stale pull request approvals when new commits are pushed"
+    compliance_mapping:
+      - "SOC2-CC7.2"
+  
+  - id: "CIS-GH-1.1.9"
+    name: "Require status checks before merge"
+    cis_control: "1.1.9"
+    severity: "high"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Ensure all checks have passed before merging new code"
+    rationale: "Status checks (CI/CD, security scans) must pass to prevent broken/vulnerable code"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.require_status_checks OR repo.required_status_checks = []
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Branches → Edit protection rule
+      2. Enable "Require status checks to pass before merging"
+      3. Select required checks (tests, linting, security scans)
+      4. Enable "Require branches to be up to date before merging"
+    compliance_mapping:
+      - "NIST-CSF-PR.IP-1"
+  
+  - id: "CIS-GH-1.1.12"
+    name: "Require signed commits"
+    cis_control: "1.1.12"
+    severity: "medium"
+    category: "integrity"
+    profile: "Level 2"
+    description: "Ensure verification of signed commits for new changes before merging"
+    rationale: "Commit signing verifies author identity and prevents impersonation"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.require_signed_commits
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Branches → Edit protection rule
+      2. Enable "Require signed commits"
+      3. Instruct developers to configure GPG signing
+    compliance_mapping:
+      - "SOC2-CC6.6"
+  
+  - id: "CIS-GH-1.1.14"
+    name: "Enforce branch protection for administrators"
+    cis_control: "1.1.14"
+    severity: "critical"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Branch protection rules must apply to administrators"
+    rationale: "Admins should not bypass security controls"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.enforce_admins
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Branches → Edit protection rule
+      2. Enable "Do not allow bypassing the above settings"
+      3. Applies rules to administrators as well
+    compliance_mapping:
+      - "SOC2-CC6.2"
+      - "PCI-DSS-7.1"
+  
+  - id: "CIS-GH-1.1.16"
+    name: "Deny force push to protected branches"
+    cis_control: "1.1.16"
+    severity: "high"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Ensure force push code to branches is denied"
+    rationale: "Force push rewrites history and can hide malicious changes"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE repo.allow_force_pushes = true
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Branches → Edit protection rule
+      2. Ensure "Allow force pushes" is DISABLED
+    compliance_mapping:
+      - "SOC2-CC7.2"
+  
+  - id: "CIS-GH-1.1.17"
+    name: "Deny branch deletion"
+    cis_control: "1.1.17"
+    severity: "medium"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Ensure branch deletions are denied for protected branches"
+    rationale: "Prevents accidental or malicious deletion of important branches"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE repo.allow_deletions = true
+      RETURN repo.name as repository
+    remediation: |
+      1. Repository Settings → Branches → Edit protection rule
+      2. Ensure "Allow deletions" is DISABLED
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "CIS-GH-1.1.20"
+    name: "Default branch must have protection enabled"
+    cis_control: "1.1.20"
+    severity: "critical"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Ensure branch protection is enforced on the default branch"
+    rationale: "Default branch (main/master) requires the highest protection"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.default_branch_protected
+      RETURN repo.name as repository,
+             repo.default_branch as branch,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Branches
+      2. Add branch protection rule for default branch
+      3. Configure required protections per CIS recommendations
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "ISO27001-A.12.1"
+
+  # ============================================================================
+  # 1.2 Repository Management
+  # ============================================================================
+  
+  - id: "CIS-GH-1.2.1"
+    name: "Public repositories must have SECURITY.md"
+    cis_control: "1.2.1"
+    severity: "low"
+    category: "documentation"
+    profile: "Level 1"
+    description: "Ensure all public repositories contain a SECURITY.md file"
+    rationale: "Security policy helps researchers report vulnerabilities responsibly"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE repo.visibility = 'public' AND NOT repo.has_security_policy
+      RETURN repo.name as repository
+    remediation: |
+      1. Create .github/SECURITY.md in repository
+      2. Include vulnerability reporting instructions
+      3. Specify supported versions and disclosure policy
+    compliance_mapping:
+      - "ISO27001-A.16.1"
+  
+  - id: "CIS-GH-1.2.7"
+    name: "Inactive repositories should be archived"
+    cis_control: "1.2.7"
+    severity: "medium"
+    category: "hygiene"
+    profile: "Level 1"
+    description: "Ensure inactive repositories are reviewed and archived periodically"
+    rationale: "Inactive repos may have unpatched vulnerabilities and expand attack surface"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE repo.last_pushed_days_ago > 180 
+        AND NOT repo.archived
+      RETURN repo.name as repository,
+             repo.last_pushed_days_ago as days_inactive,
+             repo.visibility as visibility
+    remediation: |
+      1. Review repository activity and business need
+      2. If no longer needed: Settings → Archive this repository
+      3. Document archival decision
+    compliance_mapping:
+      - "SOC2-CC6.1"
+
+  # ============================================================================
+  # 1.3 Contribution Access - Identity & Authentication
+  # ============================================================================
+  
+  - id: "CIS-GH-1.3.1"
+    name: "Remove inactive organization members"
+    cis_control: "1.3.1"
+    severity: "high"
+    category: "identity"
+    profile: "Level 1"
+    description: "Ensure inactive users are reviewed and removed periodically"
+    rationale: "Inactive accounts are targets for compromise"
+    detection_query: |
+      MATCH (u:User {platform: 'github'})-[:MEMBER_OF]->(org:Group {platform: 'github'})
+      WHERE u.last_activity_days_ago > 90 OR u.last_activity_days_ago IS NULL
+      RETURN u.username as user,
+             u.email as email,
+             u.last_activity_days_ago as days_inactive,
+             u.role as role
+    remediation: |
+      1. Organization Settings → People
+      2. Review inactive members
+      3. Remove users who no longer require access
+      4. Document removal decisions
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "ISO27001-A.9.2.6"
+  
+  - id: "CIS-GH-1.3.3"
+    name: "Maintain minimum number of organization admins"
+    cis_control: "1.3.3"
+    severity: "high"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Ensure minimum number of administrators are set (at least 2)"
+    rationale: "Multiple admins prevent single point of failure and enable separation of duties"
+    detection_query: |
+      MATCH (u:User {platform: 'github'})-[r:MEMBER_OF]->(org:Group {platform: 'github'})
+      WHERE r.role = 'admin' OR u.role = 'admin'
+      WITH org, count(u) as admin_count
+      WHERE admin_count < 2
+      RETURN org.name as organization, admin_count
+    remediation: |
+      1. Organization Settings → People
+      2. Identify trusted individuals for admin role
+      3. Assign additional administrators
+      4. Ensure admins use MFA
+    compliance_mapping:
+      - "SOC2-CC6.2"
+  
+  - id: "CIS-GH-1.3.4"
+    name: "Require MFA for all contributors"
+    cis_control: "1.3.4"
+    severity: "critical"
+    category: "authentication"
+    profile: "Level 1"
+    description: "Ensure MFA is required for contributors of new code"
+    rationale: "MFA prevents account compromise from stolen passwords"
+    detection_query: |
+      MATCH (u:User {platform: 'github'})-[:CAN_ACCESS]->(repo:Resource {platform: 'github'})
+      WHERE (u.two_factor_enabled = false OR u.two_factor_enabled IS NULL)
+        AND repo.requires_commit_signatures
+      RETURN u.username as user,
+             u.email as email,
+             count(repo) as repo_count
+    remediation: |
+      1. Organization Settings → Authentication security
+      2. Enable "Require two-factor authentication for everyone in the organization"
+      3. Give users 72 hours to enable MFA or they will be removed
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "PCI-DSS-8.3"
+      - "NIST-800-53-IA-2"
+  
+  - id: "CIS-GH-1.3.5"
+    name: "Organization requires members to use MFA"
+    cis_control: "1.3.5"
+    severity: "critical"
+    category: "authentication"
+    profile: "Level 1"
+    description: "Ensure the organization requires members to use MFA"
+    rationale: "Organization-level enforcement ensures comprehensive protection"
+    detection_query: |
+      MATCH (org:Group {platform: 'github'})
+      WHERE NOT org.two_factor_required
+      RETURN org.name as organization,
+             org.member_count as total_members
+    remediation: |
+      1. Organization Settings → Authentication security
+      2. Enable "Require two-factor authentication"
+      3. Communicate to all members before enforcement
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "ISO27001-A.9.4.2"
+  
+  - id: "CIS-GH-1.3.7"
+    name: "Repositories must have at least two admins"
+    cis_control: "1.3.7"
+    severity: "medium"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Ensure two administrators are set for each repository"
+    rationale: "Prevents single point of failure for critical repositories"
+    detection_query: |
+      MATCH (u:User)-[r:CAN_ACCESS]->(repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE r.access_level = 'admin'
+      WITH repo, count(u) as admin_count
+      WHERE admin_count < 2
+      RETURN repo.name as repository,
+             admin_count,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Manage access
+      2. Add second administrator
+      3. Ensure both admins have MFA enabled
+    compliance_mapping:
+      - "SOC2-CC6.2"
+  
+  - id: "CIS-GH-1.3.8"
+    name: "Base repository permissions should be restrictive"
+    cis_control: "1.3.8"
+    severity: "medium"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Ensure strict base permissions are set (read or none)"
+    rationale: "Default write access violates least privilege principle"
+    detection_query: |
+      MATCH (org:Group {platform: 'github'})
+      WHERE org.default_repository_permission IN ['write', 'admin']
+      RETURN org.name as organization,
+             org.default_repository_permission as default_permission
+    remediation: |
+      1. Organization Settings → Member privileges
+      2. Set "Base permissions" to "Read" or "None"
+      3. Grant write access explicitly per repository
+    compliance_mapping:
+      - "SOC2-CC6.3"
+      - "ISO27001-A.9.1.2"
+
+  # ============================================================================
+  # 1.4 Third-Party Applications & Integrations
+  # ============================================================================
+  
+  - id: "CIS-GH-1.4.1"
+    name: "Require admin approval for OAuth apps"
+    cis_control: "1.4.1"
+    severity: "high"
+    category: "third_party"
+    profile: "Level 1"
+    description: "Ensure administrator approval is required for installed applications"
+    rationale: "Prevents malicious apps from accessing organization data"
+    detection_query: |
+      MATCH (org:Group {platform: 'github'})
+      WHERE NOT org.oauth_app_restrictions_enabled
+      RETURN org.name as organization
+    remediation: |
+      1. Organization Settings → OAuth application policy
+      2. Enable "Require approval for all apps"
+      3. Review currently installed apps
+    compliance_mapping:
+      - "SOC2-CC6.6"
+  
+  - id: "CIS-GH-1.4.3"
+    name: "OAuth apps should have minimal permissions"
+    cis_control: "1.4.3"
+    severity: "medium"
+    category: "third_party"
+    profile: "Level 1"
+    description: "Ensure apps have least privilege access"
+    rationale: "Over-privileged apps increase blast radius of compromise"
+    detection_query: |
+      MATCH (app:Application {platform: 'github'})-[r:CAN_ACCESS]->(org:Group)
+      WHERE size(r.scopes) > 5 OR 'admin:org' IN r.scopes
+      RETURN app.name as application,
+             r.scopes as permissions,
+             org.name as organization
+    remediation: |
+      1. Organization Settings → Installed GitHub Apps
+      2. Review each app's permissions
+      3. Revoke unnecessary scopes
+      4. Remove apps no longer needed
+    compliance_mapping:
+      - "SOC2-CC6.3"
+
+  # ============================================================================
+  # 1.5 Code Risks - Security Scanning
+  # ============================================================================
+  
+  - id: "CIS-GH-1.5.1"
+    name: "Enable secret scanning"
+    cis_control: "1.5.1"
+    severity: "critical"
+    category: "secrets"
+    profile: "Level 1"
+    description: "Ensure scanners identify and prevent sensitive data in code"
+    rationale: "Hardcoded secrets (API keys, passwords) are frequently committed"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.secret_scanning_enabled
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Code security and analysis
+      2. Enable "Secret scanning"
+      3. Enable "Push protection" to block secret commits
+      4. Review and remediate existing secrets
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "PCI-DSS-6.3.2"
+  
+  - id: "CIS-GH-1.5.4"
+    name: "Enable code scanning for vulnerabilities"
+    cis_control: "1.5.4"
+    severity: "high"
+    category: "scanning"
+    profile: "Level 1"
+    description: "Ensure scanners are in place for code vulnerabilities"
+    rationale: "Automated SAST detects security bugs before deployment"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.code_scanning_enabled
+      RETURN repo.name as repository,
+             repo.primary_language as language,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Code security and analysis
+      2. Enable "Code scanning" with CodeQL or third-party tool
+      3. Configure automated scanning on pull requests
+    compliance_mapping:
+      - "SOC2-CC7.2"
+      - "OWASP-ASVS-V14"
+  
+  - id: "CIS-GH-1.5.5"
+    name: "Enable Dependabot for dependency scanning"
+    cis_control: "1.5.5"
+    severity: "high"
+    category: "scanning"
+    profile: "Level 1"
+    description: "Ensure scanners detect open-source vulnerabilities in packages"
+    rationale: "Vulnerable dependencies are a leading attack vector"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.dependabot_enabled
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Repository Settings → Code security and analysis
+      2. Enable "Dependabot alerts"
+      3. Enable "Dependabot security updates" for auto-patching
+      4. Configure "Dependabot version updates" in dependabot.yml
+    compliance_mapping:
+      - "SOC2-CC7.2"
+      - "NIST-CSF-ID.RA-1"
+
+  # ============================================================================
+  # Custom High-Value Rules (Beyond CIS)
+  # ============================================================================
+  
+  - id: "CUSTOM-GH-001"
+    name: "Over-privileged users (admin on 5+ repos)"
+    cis_control: "N/A"
+    severity: "high"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Detect users with admin access to excessive repositories"
+    rationale: "Concentrated admin rights increase blast radius of account compromise"
+    detection_query: |
+      MATCH (u:User {platform: 'github'})-[r:CAN_ACCESS]->(repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE r.access_level = 'admin'
+      WITH u, count(repo) as admin_repo_count, collect(repo.name) as repos
+      WHERE admin_repo_count >= 5
+      RETURN u.username as user,
+             u.email as email,
+             admin_repo_count,
+             repos
+    remediation: |
+      1. Review user's actual job requirements
+      2. Reduce to write or read access where possible
+      3. Use teams for group-based access management
+      4. Implement access reviews quarterly
+    compliance_mapping:
+      - "SOC2-CC6.3"
+  
+  - id: "CUSTOM-GH-002"
+    name: "External collaborators with write access"
+    cis_control: "N/A"
+    severity: "high"
+    category: "identity"
+    profile: "Level 1"
+    description: "Detect external users (outside org) with write/admin access"
+    rationale: "External collaborators pose higher risk than internal members"
+    detection_query: |
+      MATCH (u:User {platform: 'github', is_external: true})-[r:CAN_ACCESS]->(repo:Resource {platform: 'github'})
+      WHERE r.access_level IN ['write', 'admin']
+      RETURN u.username as external_user,
+             u.email as email,
+             repo.name as repository,
+             r.access_level as access_level
+    remediation: |
+      1. Verify business justification for external access
+      2. Reduce to read-only if possible
+      3. Set access expiration dates
+      4. Enable MFA requirement for external collaborators
+    compliance_mapping:
+      - "SOC2-CC6.2"
+  
+  - id: "CUSTOM-GH-003"
+    name: "Public repositories in organization"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Identify all public repositories that may expose sensitive data"
+    rationale: "Public repos can accidentally leak credentials, internal architecture, or IP"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository', visibility: 'public'})
+      RETURN repo.name as repository,
+             repo.description as description,
+             repo.created_at as created
+    remediation: |
+      1. Review each public repo for business justification
+      2. Scan for accidentally committed secrets
+      3. Make private if contains internal/sensitive info
+      4. Update .gitignore to prevent future leaks
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "CUSTOM-GH-004"
+    name: "Repositories without CODEOWNERS file"
+    cis_control: "1.1.6"
+    severity: "low"
+    category: "configuration"
+    profile: "Level 2"
+    description: "Critical repositories should define code owners for review requirements"
+    rationale: "Code owners ensure knowledgeable review of sensitive changes"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE NOT repo.has_codeowners
+        AND (repo.visibility = 'private' OR repo.is_fork = false)
+      RETURN repo.name as repository,
+             repo.visibility as visibility
+    remediation: |
+      1. Create .github/CODEOWNERS file
+      2. Define owners for critical paths (e.g., /src/auth @security-team)
+      3. Enable "Require review from Code Owners" in branch protection
+    compliance_mapping:
+      - "SOC2-CC7.2"
+  
+  - id: "CUSTOM-GH-005"
+    name: "Webhooks using insecure HTTP"
+    cis_control: "1.4.4"
+    severity: "high"
+    category: "third_party"
+    profile: "Level 1"
+    description: "Ensure all webhooks use HTTPS and secrets"
+    rationale: "HTTP webhooks can be intercepted; unsigned webhooks can be spoofed"
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github'})-[:HAS_WEBHOOK]->(webhook:Webhook)
+      WHERE webhook.url STARTS WITH 'http://' OR NOT webhook.has_secret
+      RETURN repo.name as repository,
+             webhook.url as webhook_url,
+             webhook.has_secret as has_secret
+    remediation: |
+      1. Repository Settings → Webhooks
+      2. Edit each webhook to use HTTPS URL
+      3. Configure a secret token for payload verification
+      4. Update webhook consumer to validate signatures
+    compliance_mapping:
+      - "SOC2-CC6.6"

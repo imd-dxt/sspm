@@ -1,0 +1,760 @@
+version: "1.0"
+benchmark: "Jira Security Best Practices"
+category: "jira"
+description: "Detection rules based on Atlassian security guidance and industry best practices for Jira Cloud/Data Center"
+
+rules:
+  # ============================================================================
+  # 1. Authentication & Identity
+  # ============================================================================
+  
+  - id: "JIRA-AUTH-001"
+    name: "Require two-factor authentication (2FA/MFA)"
+    cis_control: "CIS Control 6.3"
+    severity: "critical"
+    category: "authentication"
+    profile: "Level 1"
+    description: "Ensure 2FA/MFA is enabled and enforced for all users"
+    rationale: "Over 99% of account compromises can be prevented with MFA"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.two_factor_required OR org.two_factor_required = false
+      RETURN org.name as organization,
+             org.total_users as user_count
+    remediation: |
+      1. Navigate to admin.atlassian.com → Security
+      2. Enable "Require two-factor authentication"
+      3. Subscribe to Atlassian Guard (Standard/Premium) if needed
+      4. Configure 2FA methods (authenticator app, SMS, email)
+      5. Give users grace period (72 hours) to enable 2FA
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "NIST-800-53-IA-2"
+      - "ISO27001-A.9.4.2"
+  
+  - id: "JIRA-AUTH-002"
+    name: "Users without 2FA enabled"
+    cis_control: "CIS Control 6.3"
+    severity: "high"
+    category: "authentication"
+    profile: "Level 1"
+    description: "Detect individual users who haven't enabled 2FA"
+    rationale: "Each non-MFA account is a potential entry point for attackers"
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})
+      WHERE (u.two_factor_enabled = false OR u.two_factor_enabled IS NULL)
+        AND u.is_active = true
+      RETURN u.username as user,
+             u.email as email,
+             u.account_type as account_type
+    remediation: |
+      1. Contact users individually to enable 2FA
+      2. Send reminder emails via admin portal
+      3. After grace period, enforce 2FA requirement organization-wide
+      4. For service accounts/bots, use API tokens instead
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "PCI-DSS-8.3"
+  
+  - id: "JIRA-AUTH-003"
+    name: "Single Sign-On (SSO) not configured"
+    cis_control: "CIS Control 6.5"
+    severity: "medium"
+    category: "authentication"
+    profile: "Level 2"
+    description: "Ensure SSO is configured with identity provider"
+    rationale: "SSO centralizes authentication and enables identity federation"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.sso_enabled OR org.sso_enabled = false
+      RETURN org.name as organization
+    remediation: |
+      1. Subscribe to Atlassian Access (required for SSO)
+      2. Verify domain ownership at admin.atlassian.com
+      3. Configure SAML SSO with IdP (Okta, Azure AD, Google)
+      4. Test with pilot group before enforcing
+      5. Enable "Enforce SSO" after validation
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "ISO27001-A.9.4.2"
+  
+  - id: "JIRA-AUTH-004"
+    name: "Domain verification not completed"
+    cis_control: "N/A"
+    severity: "high"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Ensure organization domain is verified"
+    rationale: "Domain verification enables access policies and Atlassian Guard"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.domain_verified OR org.domain_verified = false
+      RETURN org.name as organization,
+             org.domain as domain
+    remediation: |
+      1. Navigate to admin.atlassian.com → Domains
+      2. Add company domain
+      3. Choose verification method (DNS TXT record or HTML file)
+      4. Complete verification process
+      5. Claim existing users on verified domain
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "JIRA-AUTH-005"
+    name: "Weak password policy"
+    cis_control: "CIS Control 5.2"
+    severity: "medium"
+    category: "authentication"
+    profile: "Level 1"
+    description: "Ensure strong password requirements are enforced"
+    rationale: "Weak passwords are easily cracked via brute force"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE org.password_min_length < 12 
+         OR NOT org.password_complexity_required
+      RETURN org.name as organization,
+             org.password_min_length as min_length,
+             org.password_complexity_required as complexity_enabled
+    remediation: |
+      1. admin.atlassian.com → Security → Password policy
+      2. Set minimum password length: 12+ characters
+      3. Require complexity (uppercase, lowercase, numbers, symbols)
+      4. Enable password expiration (90 days recommended)
+      5. Prevent password reuse (last 24 passwords)
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "NIST-800-53-IA-5"
+
+  # ============================================================================
+  # 2. Access Control & Permissions
+  # ============================================================================
+  
+  - id: "JIRA-ACCESS-001"
+    name: "Excessive global administrators"
+    cis_control: "CIS Control 6.8"
+    severity: "high"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Limit number of Jira administrators to minimum required"
+    rationale: "Too many admins increases attack surface and insider risk"
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})-[r:HAS_ROLE]->(role:Role {platform: 'jira'})
+      WHERE role.name IN ['jira-administrators', 'jira-system-administrators']
+      WITH count(u) as admin_count, collect(u.email) as admins
+      WHERE admin_count > 5
+      RETURN admin_count, admins
+    remediation: |
+      1. Review current Jira administrator list
+      2. Identify which admins actually need global permissions
+      3. Demote unnecessary admins to project-level admins
+      4. Document business justification for each global admin
+      5. Implement quarterly access reviews
+    compliance_mapping:
+      - "SOC2-CC6.2"
+      - "ISO27001-A.9.2.3"
+  
+  - id: "JIRA-ACCESS-002"
+    name: "Over-privileged users across multiple projects"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Users with admin access to 10+ projects"
+    rationale: "Concentrated privileges increase blast radius of compromise"
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})-[r:HAS_ROLE]->(project:Resource {platform: 'jira', resource_type: 'project'})
+      WHERE r.role IN ['Administrators', 'Project Admin']
+      WITH u, count(project) as admin_project_count, collect(project.name) as projects
+      WHERE admin_project_count >= 10
+      RETURN u.username as user,
+             u.email as email,
+             admin_project_count,
+             projects
+    remediation: |
+      1. Review user's actual job requirements
+      2. Reduce to contributor/developer role where possible
+      3. Use project roles instead of direct user assignments
+      4. Implement least privilege principle
+    compliance_mapping:
+      - "SOC2-CC6.3"
+      - "ISO27001-A.9.1.2"
+  
+  - id: "JIRA-ACCESS-003"
+    name: "Default permission scheme allows 'Any Logged In User'"
+    cis_control: "N/A"
+    severity: "high"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Projects using default permission scheme with overly permissive access"
+    rationale: "'Any logged in user' grants access to all employees, violating least privilege"
+    detection_query: |
+      MATCH (project:Resource {platform: 'jira', resource_type: 'project'})
+      WHERE project.default_permission_scheme = true
+        AND project.browse_permission = 'Any Logged In User'
+      RETURN project.name as project,
+             project.key as project_key,
+             project.permission_scheme as scheme
+    remediation: |
+      1. Create custom permission schemes per project type
+      2. Replace 'Any Logged In User' with specific groups/roles
+      3. Use project roles: Administrators, Developers, Users
+      4. Assign permissions to roles, not individual users
+      5. Apply principle of least privilege
+    compliance_mapping:
+      - "SOC2-CC6.3"
+  
+  - id: "JIRA-ACCESS-004"
+    name: "Public signup enabled"
+    cis_control: "N/A"
+    severity: "critical"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Organization allows anyone to create an account"
+    rationale: "Public signup enables unauthorized users to access Jira"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE org.public_signup_enabled = true
+      RETURN org.name as organization
+    remediation: |
+      1. admin.atlassian.com → Settings → User management
+      2. Disable "Allow anyone to sign up"
+      3. Restrict signups to verified domain only
+      4. Use invite-only user provisioning
+      5. Enable SCIM for automated user lifecycle
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "ISO27001-A.9.2.1"
+  
+  - id: "JIRA-ACCESS-005"
+    name: "External collaborators with admin access"
+    cis_control: "N/A"
+    severity: "high"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Users from unverified domains with elevated permissions"
+    rationale: "External users pose higher security risk than internal employees"
+    detection_query: |
+      MATCH (u:User {platform: 'jira', is_external: true})-[r:HAS_ROLE]->(project:Resource)
+      WHERE r.role IN ['Administrators', 'Project Admin', 'Manage sprints']
+      RETURN u.email as external_user,
+             u.email_domain as domain,
+             project.name as project,
+             r.role as role
+    remediation: |
+      1. Review business justification for external admin access
+      2. Reduce to contributor/viewer role if possible
+      3. Require external users to enable 2FA
+      4. Set access expiration dates for contractors
+      5. Implement monthly reviews of external access
+    compliance_mapping:
+      - "SOC2-CC6.2"
+  
+  - id: "JIRA-ACCESS-006"
+    name: "Browse Users and Groups permission granted widely"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "access_control"
+    profile: "Level 2"
+    description: "Too many users can see all organizational users/groups"
+    rationale: "Attackers can enumerate users for targeted phishing"
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})-[:HAS_PERMISSION]->(:Permission {name: 'Browse Users and Groups'})
+      WITH count(u) as user_count
+      WHERE user_count > 50
+      RETURN user_count
+    remediation: |
+      1. Settings → System → Global permissions
+      2. Remove 'Browse Users and Groups' from default groups
+      3. Grant only to managers, project leads, HR
+      4. Use group-based assignment, not individual users
+    compliance_mapping:
+      - "SOC2-CC6.3"
+  
+  - id: "JIRA-ACCESS-007"
+    name: "Inactive users with active access"
+    cis_control: "CIS Control 5.3"
+    severity: "high"
+    category: "identity"
+    profile: "Level 1"
+    description: "Users inactive for 90+ days still have Jira access"
+    rationale: "Dormant accounts are prime targets for compromise"
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})
+      WHERE u.last_login_days_ago > 90 
+        AND u.is_active = true
+      RETURN u.username as user,
+             u.email as email,
+             u.last_login_days_ago as days_inactive,
+             u.last_login_date as last_seen
+    remediation: |
+      1. Review inactive user list with managers
+      2. Disable accounts for users who left company
+      3. Revoke access for inactive contractors
+      4. Implement automated deprovisioning via SCIM
+      5. Set up quarterly user access reviews
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "ISO27001-A.9.2.6"
+
+  # ============================================================================
+  # 3. Project Configuration
+  # ============================================================================
+  
+  - id: "JIRA-PROJECT-001"
+    name: "Projects without defined project roles"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Projects relying on direct user assignments instead of roles"
+    rationale: "Roles enable scalable, auditable permission management"
+    detection_query: |
+      MATCH (project:Resource {platform: 'jira', resource_type: 'project'})
+      WHERE NOT exists(project.uses_project_roles) 
+         OR project.uses_project_roles = false
+      RETURN project.name as project,
+             project.key as project_key
+    remediation: |
+      1. Project Settings → People → Project roles
+      2. Define roles: Administrators, Developers, QA, Viewers
+      3. Assign users to roles (not individual permissions)
+      4. Update permission scheme to use roles
+      5. Remove direct user permission grants
+    compliance_mapping:
+      - "SOC2-CC6.3"
+  
+  - id: "JIRA-PROJECT-002"
+    name: "Single project administrator"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "access_control"
+    profile: "Level 1"
+    description: "Critical projects with only one administrator"
+    rationale: "Single admin creates single point of failure"
+    detection_query: |
+      MATCH (u:User)-[r:HAS_ROLE]->(project:Resource {platform: 'jira', resource_type: 'project'})
+      WHERE r.role IN ['Administrators', 'Project Admin']
+      WITH project, count(u) as admin_count
+      WHERE admin_count = 1
+      RETURN project.name as project,
+             project.key as project_key,
+             admin_count
+    remediation: |
+      1. Identify backup administrator for each project
+      2. Add second admin to critical projects
+      3. Ensure both admins have 2FA enabled
+      4. Document admin responsibilities
+    compliance_mapping:
+      - "SOC2-CC6.2"
+  
+  - id: "JIRA-PROJECT-003"
+    name: "Issue security schemes not used for sensitive projects"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "data_protection"
+    profile: "Level 2"
+    description: "Sensitive projects without issue-level security"
+    rationale: "Issue security restricts visibility of confidential tickets"
+    detection_query: |
+      MATCH (project:Resource {platform: 'jira', resource_type: 'project'})
+      WHERE project.is_sensitive = true
+        AND (NOT exists(project.security_scheme) OR project.security_scheme IS NULL)
+      RETURN project.name as project,
+             project.key as project_key
+    remediation: |
+      1. Create issue security scheme
+      2. Define security levels (Public, Internal, Confidential)
+      3. Assign groups/roles to each level
+      4. Apply scheme to sensitive projects
+      5. Train users on setting security levels
+    compliance_mapping:
+      - "SOC2-CC6.7"
+      - "ISO27001-A.13.2.1"
+
+  # ============================================================================
+  # 4. Third-Party Apps & Integrations
+  # ============================================================================
+  
+  - id: "JIRA-APP-001"
+    name: "Third-party apps with excessive permissions"
+    cis_control: "N/A"
+    severity: "high"
+    category: "third_party"
+    profile: "Level 1"
+    description: "Marketplace apps requesting admin-level access"
+    rationale: "Over-privileged apps can access all organizational data"
+    detection_query: |
+      MATCH (app:Application {platform: 'jira'})-[r:HAS_PERMISSION]->(perm:Permission)
+      WHERE perm.scope IN ['ADMIN', 'WRITE', 'ACT_AS_USER']
+      RETURN app.name as application,
+             app.vendor as vendor,
+             collect(perm.scope) as permissions
+    remediation: |
+      1. Settings → Apps → Manage apps
+      2. Review each app's permission requests
+      3. Verify app is from reputable vendor
+      4. Revoke unnecessary scopes
+      5. Uninstall unused apps
+      6. Implement app approval workflow
+    compliance_mapping:
+      - "SOC2-CC6.6"
+  
+  - id: "JIRA-APP-002"
+    name: "Unused third-party apps installed"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "third_party"
+    profile: "Level 1"
+    description: "Apps not used in 90+ days still have access"
+    rationale: "Stale apps expand attack surface unnecessarily"
+    detection_query: |
+      MATCH (app:Application {platform: 'jira'})
+      WHERE app.last_used_days_ago > 90
+      RETURN app.name as application,
+             app.last_used_days_ago as days_unused,
+             app.installed_date as installed
+    remediation: |
+      1. Identify app owners/requesters
+      2. Confirm app is no longer needed
+      3. Uninstall unused apps
+      4. Document app inventory
+      5. Quarterly app usage reviews
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "JIRA-APP-003"
+    name: "OAuth apps without admin approval"
+    cis_control: "N/A"
+    severity: "high"
+    category: "third_party"
+    profile: "Level 1"
+    description: "OAuth authorization policy not enforced"
+    rationale: "Users can grant third-party apps access without oversight"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.oauth_approval_required 
+         OR org.oauth_approval_required = false
+      RETURN org.name as organization
+    remediation: |
+      1. admin.atlassian.com → Security → OAuth policies
+      2. Enable "Require admin approval for OAuth apps"
+      3. Review existing OAuth authorizations
+      4. Revoke suspicious or unused grants
+    compliance_mapping:
+      - "SOC2-CC6.6"
+
+  # ============================================================================
+  # 5. API & Automation Security
+  # ============================================================================
+  
+  - id: "JIRA-API-001"
+    name: "Users using passwords for API authentication"
+    cis_control: "N/A"
+    severity: "high"
+    category: "authentication"
+    profile: "Level 1"
+    description: "API access using account passwords instead of tokens"
+    rationale: "Passwords in scripts/logs create credential exposure risk"
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})
+      WHERE u.uses_password_for_api = true
+      RETURN u.username as user,
+             u.email as email
+    remediation: |
+      1. Require all API access to use Personal Access Tokens (PAT)
+      2. Profile → Personal Access Tokens → Create token
+      3. Set token expiration (90 days recommended)
+      4. Rotate tokens regularly
+      5. Revoke tokens when no longer needed
+      6. For Cloud: Use API tokens from account settings
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "JIRA-API-002"
+    name: "API tokens without expiration"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "authentication"
+    profile: "Level 2"
+    description: "Personal Access Tokens set to never expire"
+    rationale: "Non-expiring tokens pose long-term credential exposure risk"
+    detection_query: |
+      MATCH (token:APIToken {platform: 'jira'})
+      WHERE token.expiration IS NULL OR token.expiration = 'never'
+      RETURN token.name as token_name,
+             token.owner as owner,
+             token.created_date as created
+    remediation: |
+      1. Set organizational policy: max token lifetime 90 days
+      2. Configure system property for token expiration
+      3. Notify token owners to renew before expiry
+      4. Implement token rotation automation
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "JIRA-API-003"
+    name: "Service accounts without proper documentation"
+    cis_control: "N/A"
+    severity: "low"
+    category: "identity"
+    profile: "Level 2"
+    description: "Bot/service accounts lacking owner/purpose documentation"
+    rationale: "Undocumented service accounts become orphaned and unmanaged"
+    detection_query: |
+      MATCH (u:User {platform: 'jira', account_type: 'service'})
+      WHERE NOT exists(u.owner) OR NOT exists(u.purpose)
+      RETURN u.username as service_account,
+             u.created_date as created
+    remediation: |
+      1. Document each service account: owner, purpose, permissions
+      2. Tag service accounts with metadata
+      3. Implement service account review process
+      4. Set expiration for temporary automation accounts
+    compliance_mapping:
+      - "SOC2-CC6.1"
+
+  # ============================================================================
+  # 6. Audit & Monitoring
+  # ============================================================================
+  
+  - id: "JIRA-AUDIT-001"
+    name: "Audit log retention too short"
+    cis_control: "CIS Control 8.11"
+    severity: "medium"
+    category: "logging"
+    profile: "Level 2"
+    description: "Audit logs retained for less than 365 days"
+    rationale: "Forensic investigations require historical audit data"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE org.audit_log_retention_days < 365
+      RETURN org.name as organization,
+             org.audit_log_retention_days as retention_days
+    remediation: |
+      1. admin.atlassian.com → Security → Audit log
+      2. Set retention to 365 days (recommended)
+      3. Export logs to SIEM for long-term retention
+      4. Configure log forwarding to external storage
+    compliance_mapping:
+      - "SOC2-CC7.2"
+      - "ISO27001-A.12.4.1"
+  
+  - id: "JIRA-AUDIT-002"
+    name: "No audit log monitoring configured"
+    cis_control: "CIS Control 8.5"
+    severity: "medium"
+    category: "logging"
+    profile: "Level 2"
+    description: "Audit logs not forwarded to monitoring/SIEM system"
+    rationale: "Real-time monitoring enables threat detection"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.audit_log_forwarding_enabled
+      RETURN org.name as organization
+    remediation: |
+      1. Configure audit log streaming to SIEM
+      2. Set up alerts for critical events:
+         - Admin privilege changes
+         - Permission scheme modifications
+         - Mass user deletions
+         - Failed login attempts (>5)
+      3. Integrate with SOC/incident response
+    compliance_mapping:
+      - "SOC2-CC7.2"
+      - "NIST-CSF-DE.AE-3"
+
+  # ============================================================================
+  # 7. Data Protection
+  # ============================================================================
+  
+  - id: "JIRA-DATA-001"
+    name: "Encryption at rest not enabled"
+    cis_control: "CIS Control 3.11"
+    severity: "high"
+    category: "data_protection"
+    profile: "Level 2"
+    description: "Database/attachments not encrypted at rest"
+    rationale: "Protects data if physical storage is compromised"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.encryption_at_rest_enabled
+      RETURN org.name as organization
+    remediation: |
+      1. For Cloud: Encryption at rest is enabled by default (AES-256)
+      2. For Data Center/Server:
+         - Enable database encryption
+         - Encrypt attachment storage
+         - Use encrypted file system
+      3. Verify encryption in security settings
+    compliance_mapping:
+      - "SOC2-CC6.1"
+      - "PCI-DSS-3.4"
+      - "ISO27001-A.10.1.1"
+  
+  - id: "JIRA-DATA-002"
+    name: "Sensitive data in issue descriptions"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "data_protection"
+    profile: "Level 1"
+    description: "Issues containing PII, credentials, or sensitive data patterns"
+    rationale: "Sensitive data in tickets may be exposed to unauthorized users"
+    detection_query: |
+      MATCH (issue:Resource {platform: 'jira', resource_type: 'issue'})
+      WHERE issue.description =~ '.*\\b(password|secret|api[_-]?key|credit[_-]?card)\\b.*'
+         OR issue.description =~ '.*\\b\\d{3}-\\d{2}-\\d{4}\\b.*'
+      RETURN issue.key as issue_key,
+             issue.project as project,
+             issue.created_by as creator
+      LIMIT 100
+    remediation: |
+      1. Train users on data classification
+      2. Use issue security levels for sensitive data
+      3. Implement automated scanning (DLP)
+      4. Remove exposed sensitive data from descriptions
+      5. Use secure file attachments for credentials
+    compliance_mapping:
+      - "SOC2-CC6.7"
+      - "GDPR-Article-32"
+
+  # ============================================================================
+  # 8. Configuration Hygiene
+  # ============================================================================
+  
+  - id: "JIRA-CONFIG-001"
+    name: "Default admin account still active"
+    cis_control: "N/A"
+    severity: "high"
+    category: "configuration"
+    profile: "Level 1"
+    description: "Default 'admin' account not renamed or disabled"
+    rationale: "Well-known admin username is common brute force target"
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})
+      WHERE u.username IN ['admin', 'administrator', 'jira-admin']
+        AND u.is_active = true
+      RETURN u.username as username,
+             u.email as email
+    remediation: |
+      1. Create new admin account with unique name
+      2. Transfer admin permissions to new account
+      3. Disable or rename default admin account
+      4. Enable 2FA on all admin accounts
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "JIRA-CONFIG-002"
+    name: "CAPTCHA not enabled for login"
+    cis_control: "N/A"
+    severity: "low"
+    category: "configuration"
+    profile: "Level 2"
+    description: "No CAPTCHA protection against automated login attempts"
+    rationale: "CAPTCHA prevents credential stuffing and brute force"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.captcha_enabled
+      RETURN org.name as organization
+    remediation: |
+      1. Settings → System → CAPTCHA settings
+      2. Enable CAPTCHA on login after failed attempts
+      3. Set threshold: 3-5 failed attempts
+      4. Use reCAPTCHA v3 for better UX
+    compliance_mapping:
+      - "SOC2-CC6.1"
+  
+  - id: "JIRA-CONFIG-003"
+    name: "Email notifications sent over HTTP"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "configuration"
+    profile: "Level 2"
+    description: "SMTP not configured with TLS/SSL encryption"
+    rationale: "Unencrypted emails can be intercepted"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.smtp_tls_enabled
+      RETURN org.name as organization,
+             org.smtp_server as smtp_server
+    remediation: |
+      1. Settings → System → Outgoing Mail
+      2. Enable TLS/SSL for SMTP
+      3. Use port 587 (STARTTLS) or 465 (SSL)
+      4. Test email delivery after enabling
+    compliance_mapping:
+      - "SOC2-CC6.6"
+
+  # ============================================================================
+  # 9. Workflow Security
+  # ============================================================================
+  
+  - id: "JIRA-WORKFLOW-001"
+    name: "Workflows without transition restrictions"
+    cis_control: "N/A"
+    severity: "low"
+    category: "configuration"
+    profile: "Level 2"
+    description: "Workflow transitions available to all users"
+    rationale: "Unrestricted workflows allow unauthorized status changes"
+    detection_query: |
+      MATCH (workflow:Workflow {platform: 'jira'})
+      WHERE NOT workflow.has_transition_restrictions
+      RETURN workflow.name as workflow,
+             workflow.projects as projects
+    remediation: |
+      1. Project Settings → Workflows → Edit workflow
+      2. Add conditions to transitions (role-based)
+      3. Require specific permissions for critical transitions
+      4. Use validators to enforce business rules
+    compliance_mapping:
+      - "SOC2-CC6.3"
+  
+  - id: "JIRA-WORKFLOW-002"
+    name: "Post-functions executing without validation"
+    cis_control: "N/A"
+    severity: "medium"
+    category: "configuration"
+    profile: "Level 2"
+    description: "Workflow post-functions lack input validation"
+    rationale: "Unvalidated post-functions can cause data corruption or security issues"
+    detection_query: |
+      MATCH (workflow:Workflow {platform: 'jira'})-[:HAS_POSTFUNCTION]->(pf:PostFunction)
+      WHERE NOT pf.has_validation
+      RETURN workflow.name as workflow,
+             pf.type as function_type
+    remediation: |
+      1. Review all workflow post-functions
+      2. Add validators before post-functions
+      3. Sanitize user inputs in scripts
+      4. Use Groovy/ScriptRunner best practices
+      5. Test workflows in non-production first
+    compliance_mapping:
+      - "SOC2-CC7.2"
+
+  # ============================================================================
+  # 10. Mobile & Remote Access
+  # ============================================================================
+  
+  - id: "JIRA-MOBILE-001"
+    name: "Mobile device management (MDM) not enforced"
+    cis_control: "CIS Control 2.3"
+    severity: "medium"
+    category: "access_control"
+    profile: "Level 2"
+    description: "No MAM/MDM policy for Jira mobile app"
+    rationale: "Unmanaged mobile devices can leak data via screenshots/copy-paste"
+    detection_query: |
+      MATCH (org:Group {platform: 'jira'})
+      WHERE NOT org.mobile_policy_enabled
+      RETURN org.name as organization
+    remediation: |
+      1. Subscribe to Atlassian Guard Premium
+      2. admin.atlassian.com → Security → Mobile policy
+      3. Configure restrictions:
+         - Disable copy/paste
+         - Disable screenshots
+         - Require device passcode
+      4. Integrate with corporate MDM (Intune, Workspace ONE)
+    compliance_mapping:
+      - "SOC2-CC6.6"
+      - "ISO27001-A.6.2.1"

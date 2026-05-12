@@ -1,0 +1,1288 @@
+---
+# Entra ID (Azure Active Directory) Security Detection Rules
+# Based on: CIS Microsoft Azure AD Benchmark v2.0 + Microsoft Security Best Practices
+# Platform: entraid
+# Total Rules: 50
+
+rules:
+
+  # ============================================================================
+  # CATEGORY 1: AUTHENTICATION & MFA (CIS 1.1.x)
+  # ============================================================================
+
+  - id: EID-AUTH-001
+    name: MFA Not Enabled for All Users
+    platform: entraid
+    severity: critical
+    category: authentication
+    cis_control: "1.1.1"
+    description: >
+      Multi-Factor Authentication must be enabled for all users.
+      Accounts without MFA are highly vulnerable to credential-based attacks
+      such as password spray and phishing.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})
+      WHERE u.mfa_enabled = false
+        AND u.is_active = true
+        AND u.account_type <> 'ServiceAccount'
+      RETURN u.display_name as user,
+             u.user_principal_name as upn,
+             u.department as department,
+             u.created_date as created
+    remediation: |
+      1. Navigate to Entra ID Portal → Protection → Conditional Access
+      2. Create a policy requiring MFA for all users
+      3. OR enable Security Defaults (simpler approach)
+         Entra ID → Properties → Manage Security Defaults → Enable
+      4. Use Microsoft Authenticator app (strongest factor)
+      5. Exclude break-glass accounts with compensating controls
+    compliance_mapping:
+      - CIS-Azure-AD: "1.1.1"
+      - SOC2: CC6.1
+      - ISO27001: A.9.4.2
+      - NIST-800-53: IA-2(1)
+      - GDPR: Article 32
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.1.1"
+      - "https://learn.microsoft.com/en-us/entra/identity/conditional-access/howto-conditional-access-policy-all-users-mfa"
+
+  - id: EID-AUTH-002
+    name: MFA Not Required for Privileged Roles
+    platform: entraid
+    severity: critical
+    category: authentication
+    cis_control: "1.1.2"
+    description: >
+      Privileged role holders (Global Admin, Security Admin, etc.) must
+      always use MFA. Compromise of privileged accounts can affect the entire tenant.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})-[:HAS_ROLE]->(r:DirectoryRole)
+      WHERE r.is_privileged = true
+        AND u.mfa_enabled = false
+        AND u.is_active = true
+      RETURN u.display_name as user,
+             u.user_principal_name as upn,
+             collect(r.display_name) as privileged_roles
+    remediation: |
+      1. Entra ID → Protection → Conditional Access → New Policy
+      2. Target: Users → Select directory roles → All privileged roles
+      3. Grant: Require MFA
+      4. Enable policy
+      5. Also configure PIM to require MFA for role activation
+    compliance_mapping:
+      - CIS-Azure-AD: "1.1.2"
+      - SOC2: CC6.1
+      - NIST-800-53: IA-2(2)
+      - PCI-DSS: 8.4.2
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.1.2"
+
+  - id: EID-AUTH-003
+    name: Legacy Authentication Protocols Not Blocked
+    platform: entraid
+    severity: high
+    category: authentication
+    cis_control: "1.1.3"
+    description: >
+      Legacy authentication protocols (IMAP, SMTP, POP3, Basic Auth) do not
+      support MFA and must be blocked. They are a primary attack vector
+      for credential stuffing attacks.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.legacy_auth_blocked = false
+         OR org.legacy_auth_blocked IS NULL
+      RETURN org.tenant_name as tenant,
+             org.legacy_auth_blocked as status,
+             'Legacy authentication enabled' as risk
+    remediation: |
+      1. Entra ID → Protection → Conditional Access → New Policy
+      2. Users: All users
+      3. Conditions → Client Apps → Select legacy authentication clients
+      4. Grant → Block access
+      5. Enable policy
+      6. Monitor sign-in logs for blocked legacy auth attempts before enforcing
+    compliance_mapping:
+      - CIS-Azure-AD: "1.1.3"
+      - SOC2: CC6.1
+      - NIST-800-53: IA-2
+      - PCI-DSS: 8.2.1
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.1.3"
+      - "https://learn.microsoft.com/en-us/entra/identity/conditional-access/block-legacy-authentication"
+
+  - id: EID-AUTH-004
+    name: Password Hash Synchronization Not Enabled
+    platform: entraid
+    severity: medium
+    category: authentication
+    cis_control: "1.1.4"
+    description: >
+      Password Hash Synchronization (PHS) enables leaked credential detection
+      and provides resilience if federation services are unavailable.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.password_hash_sync_enabled = false
+        AND org.hybrid_identity = true
+      RETURN org.tenant_name as tenant,
+             'Password Hash Sync disabled' as finding
+    remediation: |
+      1. Open Azure AD Connect
+      2. Configure → Password Hash Synchronization → Enable
+      3. Sync cycle will begin automatically
+      4. Monitor sync health in Entra ID Connect Health
+    compliance_mapping:
+      - CIS-Azure-AD: "1.1.4"
+      - NIST-800-53: IA-5
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.1.4"
+
+  - id: EID-AUTH-005
+    name: Self-Service Password Reset Not Configured Securely
+    platform: entraid
+    severity: medium
+    category: authentication
+    cis_control: "1.1.5"
+    description: >
+      SSPR must require at least 2 authentication methods to prevent
+      account takeover through weak password reset flows.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.sspr_enabled = true
+        AND org.sspr_auth_methods_required < 2
+      RETURN org.tenant_name as tenant,
+             org.sspr_auth_methods_required as methods_required,
+             'SSPR requires only 1 authentication method' as risk
+    remediation: |
+      1. Entra ID → Protection → Password Reset → Authentication Methods
+      2. Set "Number of methods required to reset" to 2
+      3. Enable strong methods: Authenticator app, Email, Phone
+      4. Disable weak methods if possible
+      5. Enable SSPR registration campaign
+    compliance_mapping:
+      - CIS-Azure-AD: "1.1.5"
+      - NIST-800-53: IA-5(1)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.1.5"
+
+  # ============================================================================
+  # CATEGORY 2: IDENTITY & ACCESS MANAGEMENT (CIS 1.2.x)
+  # ============================================================================
+
+  - id: EID-IAM-001
+    name: Global Administrator Count Exceeds Recommended Threshold
+    platform: entraid
+    severity: critical
+    category: identity_management
+    cis_control: "1.2.1"
+    description: >
+      The number of Global Administrators should be between 2 and 4.
+      Too few creates a single point of failure; too many increases attack surface.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})-[:HAS_ROLE]->(r:DirectoryRole)
+      WHERE r.display_name = 'Global Administrator'
+        AND u.is_active = true
+      WITH count(u) as admin_count
+      WHERE admin_count < 2 OR admin_count > 4
+      RETURN admin_count,
+             CASE WHEN admin_count < 2 
+                  THEN 'Too few Global Admins - single point of failure'
+                  ELSE 'Too many Global Admins - excess attack surface'
+             END as finding
+    remediation: |
+      If too many (>4):
+        1. Entra ID → Roles and Administrators → Global Administrator
+        2. Review each assignment - remove unnecessary ones
+        3. Use specific roles (Exchange Admin, User Admin) instead
+        4. Use PIM for just-in-time access
+      If too few (<2):
+        1. Add a second Global Admin account as backup
+        2. Ensure break-glass accounts are properly configured
+    compliance_mapping:
+      - CIS-Azure-AD: "1.2.1"
+      - SOC2: CC6.3
+      - NIST-800-53: AC-6(5)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.2.1"
+      - "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/best-practices"
+
+  - id: EID-IAM-002
+    name: Privileged Identity Management Not Enabled
+    platform: entraid
+    severity: high
+    category: identity_management
+    cis_control: "1.2.2"
+    description: >
+      Privileged Identity Management (PIM) provides just-in-time privileged
+      access and requires justification for role activation, reducing the risk
+      of standing privileged access.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.pim_enabled = false
+      RETURN org.tenant_name as tenant,
+             'PIM not licensed or enabled' as finding
+    remediation: |
+      1. Requires Azure AD Premium P2 license
+      2. Entra ID → Identity Governance → Privileged Identity Management
+      3. Discover and manage roles → Azure AD Roles
+      4. Convert permanent assignments to eligible assignments
+      5. Configure approval workflows for sensitive roles
+      6. Set maximum activation duration (e.g., 8 hours)
+    compliance_mapping:
+      - CIS-Azure-AD: "1.2.2"
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.3
+      - NIST-800-53: AC-2(7)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.2.2"
+
+  - id: EID-IAM-003
+    name: Permanent Privileged Role Assignments Detected
+    platform: entraid
+    severity: high
+    category: identity_management
+    cis_control: "1.2.3"
+    description: >
+      Privileged roles should be assigned as eligible (just-in-time) via PIM,
+      not as permanent active assignments. Permanent assignments increase
+      the window of opportunity for attackers.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})-[r:HAS_ROLE {assignment_type: 'permanent'}]->(role:DirectoryRole)
+      WHERE role.is_privileged = true
+        AND u.is_active = true
+        AND u.account_type <> 'ServiceAccount'
+      RETURN u.display_name as user,
+             u.user_principal_name as upn,
+             role.display_name as permanent_role,
+             r.assigned_date as assigned_since
+    remediation: |
+      1. Go to PIM → Azure AD Roles → Assignments
+      2. Find permanent active assignments for privileged roles
+      3. Remove permanent assignment
+      4. Add user as "Eligible" instead
+      5. Configure activation requirements (MFA, justification, approval)
+    compliance_mapping:
+      - CIS-Azure-AD: "1.2.3"
+      - SOC2: CC6.3
+      - NIST-800-53: AC-6
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.2.3"
+
+  - id: EID-IAM-004
+    name: Break-Glass Accounts Not Properly Configured
+    platform: entraid
+    severity: high
+    category: identity_management
+    cis_control: "1.2.4"
+    description: >
+      Break-glass (emergency access) accounts must exist, be cloud-only,
+      excluded from Conditional Access, and monitored for any sign-in activity.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (u:User {platform: 'entraid', is_break_glass: true})
+        WHERE u.is_cloud_only = true
+          AND u.mfa_type = 'FIDO2'
+      }
+      RETURN org.tenant_name as tenant,
+             'Break-glass accounts missing or misconfigured' as finding
+    remediation: |
+      1. Create 2 break-glass accounts with cloud-only credentials
+      2. Use format: breakglass1@yourtenant.onmicrosoft.com
+      3. Assign Global Administrator role permanently
+      4. Use FIDO2 hardware key (not phone-based MFA)
+      5. Exclude from ALL Conditional Access policies
+      6. Store credentials in physical vault
+      7. Set up alert for any sign-in from these accounts
+      8. Test accounts quarterly
+    compliance_mapping:
+      - CIS-Azure-AD: "1.2.4"
+      - NIST-800-53: AC-2
+      - ISO27001: A.9.2.1
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.2.4"
+      - "https://learn.microsoft.com/en-us/entra/identity/role-based-access-control/security-emergency-access"
+
+  - id: EID-IAM-005
+    name: Inactive Guest Accounts Not Removed
+    platform: entraid
+    severity: medium
+    category: identity_management
+    cis_control: "1.2.5"
+    description: >
+      Guest accounts that have been inactive for 90+ days should be reviewed
+      and removed to minimize the external attack surface.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid', user_type: 'Guest'})
+      WHERE u.is_active = true
+        AND (u.last_sign_in_days_ago > 90 OR u.last_sign_in_date IS NULL)
+      RETURN u.display_name as guest_user,
+             u.user_principal_name as upn,
+             u.last_sign_in_days_ago as days_inactive,
+             u.invited_by as invited_by,
+             u.created_date as created
+    remediation: |
+      1. Entra ID → Users → Filter by "Guest" user type
+      2. Sort by Last sign-in date
+      3. Review guests inactive for 90+ days
+      4. Contact inviting user to confirm if still needed
+      5. Remove guest accounts no longer required
+      6. Implement Access Reviews for periodic guest cleanup:
+         Identity Governance → Access Reviews
+    compliance_mapping:
+      - CIS-Azure-AD: "1.2.5"
+      - SOC2: CC6.2
+      - ISO27001: A.9.2.6
+      - NIST-800-53: AC-2(3)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.2.5"
+
+  - id: EID-IAM-006
+    name: Guest User Permissions Too Permissive
+    platform: entraid
+    severity: medium
+    category: identity_management
+    cis_control: "1.2.6"
+    description: >
+      Guest users should have restricted permissions and should not be able
+      to enumerate directory objects or invite other guests.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.guest_user_role_id = 'a0b1b346-4d3e-4e8b-98f8-753987be4970'
+         OR org.guests_can_invite_others = true
+         OR org.guest_access_restrictions = 'sameAsMembers'
+      RETURN org.tenant_name as tenant,
+             org.guest_access_restrictions as current_restrictions,
+             org.guests_can_invite_others as can_invite
+    remediation: |
+      1. Entra ID → External Identities → External Collaboration Settings
+      2. Guest user access: "Guest users have limited access"
+      3. Guest invite settings: "Only users assigned to specific admin roles can invite"
+      4. Enable email one-time passcode for guests without Microsoft accounts
+      5. Review and restrict cross-tenant access settings
+    compliance_mapping:
+      - CIS-Azure-AD: "1.2.6"
+      - SOC2: CC6.3
+      - NIST-800-53: AC-3
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.2.6"
+
+  # ============================================================================
+  # CATEGORY 3: CONDITIONAL ACCESS (CIS 1.3.x)
+  # ============================================================================
+
+  - id: EID-CA-001
+    name: No Conditional Access Policy for Risky Sign-ins
+    platform: entraid
+    severity: high
+    category: conditional_access
+    cis_control: "1.3.1"
+    description: >
+      Conditional Access policies should block or require MFA step-up for
+      risky sign-ins detected by Entra ID Identity Protection.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (policy:ConditionalAccessPolicy {platform: 'entraid'})
+        WHERE policy.is_enabled = true
+          AND 'signInRiskLevels' IN policy.conditions
+          AND policy.risk_levels_targeted IN ['high', 'medium']
+      }
+      RETURN org.tenant_name as tenant,
+             'No risky sign-in Conditional Access policy found' as finding
+    remediation: |
+      1. Requires Azure AD Premium P2 (Identity Protection)
+      2. Entra ID → Protection → Conditional Access → New Policy
+      3. Users: All users
+      4. Conditions → Sign-in risk → High and Medium
+      5. Grant: Require MFA OR Block access (for High risk)
+      6. Enable policy in Report-only mode first, then enforce
+    compliance_mapping:
+      - CIS-Azure-AD: "1.3.1"
+      - SOC2: CC7.2
+      - NIST-800-53: AC-2(13)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.3.1"
+
+  - id: EID-CA-002
+    name: No Conditional Access Policy for Risky Users
+    platform: entraid
+    severity: high
+    category: conditional_access
+    cis_control: "1.3.2"
+    description: >
+      Users flagged as high-risk by Identity Protection (compromised credentials)
+      should be required to change their password.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (policy:ConditionalAccessPolicy {platform: 'entraid'})
+        WHERE policy.is_enabled = true
+          AND 'userRiskLevels' IN policy.conditions
+      }
+      RETURN org.tenant_name as tenant,
+             'No user risk Conditional Access policy configured' as finding
+    remediation: |
+      1. Entra ID → Protection → Conditional Access → New Policy
+      2. Users: All users
+      3. Conditions → User risk → High
+      4. Grant: Require password change (with MFA)
+      5. Enable policy
+    compliance_mapping:
+      - CIS-Azure-AD: "1.3.2"
+      - NIST-800-53: IA-5
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.3.2"
+
+  - id: EID-CA-003
+    name: Compliant Device Not Required for Corporate Resources
+    platform: entraid
+    severity: medium
+    category: conditional_access
+    cis_control: "1.3.3"
+    description: >
+      Access to corporate resources should require a compliant or
+      Hybrid Azure AD joined device to prevent access from unmanaged devices.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (policy:ConditionalAccessPolicy {platform: 'entraid'})
+        WHERE policy.is_enabled = true
+          AND policy.grant_controls CONTAINS 'compliantDevice'
+      }
+      RETURN org.tenant_name as tenant,
+             'No device compliance Conditional Access policy found' as finding
+    remediation: |
+      1. Requires Intune or compatible MDM solution
+      2. Entra ID → Protection → Conditional Access → New Policy
+      3. Users: All users (exclude break-glass)
+      4. Cloud Apps: All cloud apps or specific critical apps
+      5. Grant: Require device to be marked as compliant
+      6. Enable policy in Report-only mode first
+    compliance_mapping:
+      - CIS-Azure-AD: "1.3.3"
+      - SOC2: CC6.6
+      - NIST-800-53: AC-19
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.3.3"
+
+  - id: EID-CA-004
+    name: Privileged Admin Workstation Not Enforced
+    platform: entraid
+    severity: high
+    category: conditional_access
+    cis_control: "1.3.4"
+    description: >
+      Global Administrators and other privileged roles should only be able
+      to perform admin tasks from Privileged Access Workstations (PAWs).
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})-[:HAS_ROLE]->(r:DirectoryRole)
+      WHERE r.display_name = 'Global Administrator'
+        AND u.is_active = true
+        AND NOT EXISTS {
+          MATCH (policy:ConditionalAccessPolicy {platform: 'entraid'})
+          WHERE policy.targets_global_admins = true
+            AND policy.requires_paw = true
+        }
+      RETURN u.display_name as admin,
+             u.user_principal_name as upn,
+             'No PAW requirement enforced for admin' as finding
+    remediation: |
+      1. Deploy Privileged Access Workstations (PAWs)
+      2. Create Named Location for PAW IP ranges
+      3. Create Conditional Access policy:
+         - Target: Global Administrator role
+         - Location: NOT PAW location
+         - Action: Block
+      4. Alternatively use Entra ID Device Filter conditions
+    compliance_mapping:
+      - CIS-Azure-AD: "1.3.4"
+      - SOC2: CC6.6
+      - NIST-800-53: AC-17(1)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.3.4"
+
+  # ============================================================================
+  # CATEGORY 4: USER SECURITY (CIS 1.4.x)
+  # ============================================================================
+
+  - id: EID-USR-001
+    name: Password Expiration Policy Not Configured
+    platform: entraid
+    severity: low
+    category: user_security
+    cis_control: "1.4.1"
+    description: >
+      Per Microsoft and NIST guidelines, passwords should NOT expire unless
+      there is evidence of compromise. However, a consistent policy must exist.
+      Cloud-only accounts should use "Password never expires" with MFA.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.password_expiry_policy = 'inconsistent'
+         OR org.password_expiry_days < 365 AND org.mfa_required = false
+      RETURN org.tenant_name as tenant,
+             org.password_expiry_days as expiry_days,
+             org.mfa_required as mfa_required
+    remediation: |
+      1. Entra ID → Users → Password expiration policy
+      2. If MFA is enforced: Set "Password never expires" for cloud accounts
+      3. If MFA NOT enforced: Set expiration to 365 days maximum
+      4. Use Microsoft Entra Password Protection to ban common passwords
+    compliance_mapping:
+      - CIS-Azure-AD: "1.4.1"
+      - NIST-800-63B: 5.1.1
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.4.1"
+
+  - id: EID-USR-002
+    name: Privileged Accounts Using Cloud-Only Identities Not Enforced
+    platform: entraid
+    severity: high
+    category: user_security
+    cis_control: "1.4.2"
+    description: >
+      Admin accounts should be cloud-only (not synced from on-premises AD)
+      to prevent on-premises compromise from affecting cloud admin capabilities.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})-[:HAS_ROLE]->(r:DirectoryRole)
+      WHERE r.is_privileged = true
+        AND u.on_premises_sync_enabled = true
+        AND u.is_active = true
+      RETURN u.display_name as user,
+             u.user_principal_name as upn,
+             collect(r.display_name) as privileged_roles,
+             'Synced from on-premises - high risk' as finding
+    remediation: |
+      1. Create dedicated cloud-only admin accounts
+      2. Use format: admin_firstname@tenant.onmicrosoft.com
+      3. Do NOT sync admin accounts from on-premises AD
+      4. Assign privileged roles to cloud-only accounts
+      5. Remove privileged role assignments from synced accounts
+    compliance_mapping:
+      - CIS-Azure-AD: "1.4.2"
+      - SOC2: CC6.3
+      - NIST-800-53: AC-6(5)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.4.2"
+
+  - id: EID-USR-003
+    name: Shared Mailbox Accounts Not Blocked from Sign-in
+    platform: entraid
+    severity: medium
+    category: user_security
+    cis_control: "1.4.3"
+    description: >
+      Shared mailboxes should have their associated Entra ID accounts
+      blocked from interactive sign-in to prevent misuse.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})
+      WHERE u.is_shared_mailbox = true
+        AND u.account_enabled = true
+        AND u.sign_in_blocked = false
+      RETURN u.display_name as shared_mailbox,
+             u.user_principal_name as upn,
+             'Shared mailbox can sign in interactively' as risk
+    remediation: |
+      1. Exchange Admin Center → Mailboxes → Shared
+      2. Identify all shared mailboxes
+      3. For each shared mailbox:
+         Entra ID → Users → Select user → Block sign-in → Yes
+      4. Or use PowerShell:
+         Set-AzureADUser -ObjectId <id> -AccountEnabled $false
+    compliance_mapping:
+      - CIS-Azure-AD: "1.4.3"
+      - SOC2: CC6.2
+      - ISO27001: A.9.2.5
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.4.3"
+
+  # ============================================================================
+  # CATEGORY 5: APPLICATION SECURITY (CIS 1.5.x)
+  # ============================================================================
+
+  - id: EID-APP-001
+    name: Users Can Consent to Third-Party Apps Without Admin Approval
+    platform: entraid
+    severity: high
+    category: application_security
+    cis_control: "1.5.1"
+    description: >
+      Users should not be allowed to consent to third-party applications
+      without admin approval. This prevents OAuth phishing attacks where
+      malicious apps gain access to user data.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.user_consent_policy = 'allow_all'
+         OR org.user_consent_policy IS NULL
+      RETURN org.tenant_name as tenant,
+             org.user_consent_policy as current_policy,
+             'Users can consent without admin approval' as risk
+    remediation: |
+      1. Entra ID → Applications → Enterprise Applications → Consent and Permissions
+      2. User consent settings: "Do not allow user consent"
+      3. OR set to: "Allow user consent for apps from verified publishers"
+      4. Configure Admin consent workflow so users can request approval
+      5. Entra ID → Enterprise Applications → Admin consent requests → Enable
+    compliance_mapping:
+      - CIS-Azure-AD: "1.5.1"
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.3
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.5.1"
+      - "https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/configure-user-consent"
+
+  - id: EID-APP-002
+    name: Service Principals with Excessive Permissions
+    platform: entraid
+    severity: high
+    category: application_security
+    cis_control: "1.5.2"
+    description: >
+      Service principals and app registrations should follow the principle
+      of least privilege and not hold unnecessary directory roles or permissions.
+    detection_query: |
+      MATCH (sp:ServicePrincipal {platform: 'entraid'})-[:HAS_ROLE]->(r:DirectoryRole)
+      WHERE r.is_privileged = true
+      RETURN sp.display_name as service_principal,
+             sp.app_id as app_id,
+             collect(r.display_name) as dangerous_roles,
+             sp.created_date as created
+    remediation: |
+      1. Review all service principals with privileged roles
+      2. Entra ID → App Registrations → Select app → API permissions
+      3. Remove unnecessary permissions
+      4. Use application permissions only when user delegation is impossible
+      5. Prefer delegated permissions for user-context operations
+      6. Implement certificate-based authentication (not client secrets)
+    compliance_mapping:
+      - CIS-Azure-AD: "1.5.2"
+      - SOC2: CC6.3
+      - NIST-800-53: AC-6
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.5.2"
+
+  - id: EID-APP-003
+    name: App Registration Client Secrets Expiring or Not Rotated
+    platform: entraid
+    severity: medium
+    category: application_security
+    cis_control: "1.5.3"
+    description: >
+      Application client secrets should have an expiration date and be
+      rotated regularly. Long-lived or expired secrets are a security risk.
+    detection_query: |
+      MATCH (app:AppRegistration {platform: 'entraid'})-[:HAS_SECRET]->(secret:ClientSecret)
+      WHERE secret.expiry_days_remaining < 30
+         OR secret.expiry_date IS NULL
+         OR secret.last_rotated_days_ago > 365
+      RETURN app.display_name as application,
+             app.app_id as app_id,
+             secret.expiry_days_remaining as expires_in_days,
+             secret.last_rotated_days_ago as days_since_rotation
+    remediation: |
+      1. Entra ID → App Registrations → Select App → Certificates & Secrets
+      2. Review all client secrets with far future or no expiry
+      3. Delete old secrets and create new ones with 90-day expiry max
+      4. Prefer certificates over secrets for production apps
+      5. Implement automated secret rotation using Key Vault
+    compliance_mapping:
+      - CIS-Azure-AD: "1.5.3"
+      - SOC2: CC6.1
+      - NIST-800-53: IA-5(1)
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.5.3"
+
+  - id: EID-APP-004
+    name: Unverified Publisher Applications Granted High Permissions
+    platform: entraid
+    severity: high
+    category: application_security
+    cis_control: "1.5.4"
+    description: >
+      Applications from unverified publishers with high-privilege permissions
+      should be investigated as they may be malicious OAuth apps.
+    detection_query: |
+      MATCH (sp:ServicePrincipal {platform: 'entraid'})-[:HAS_PERMISSION]->(perm:AppPermission)
+      WHERE sp.publisher_verified = false
+        AND perm.permission_type IN ['Mail.ReadWrite', 'Files.ReadWrite.All', 
+                                      'Directory.ReadWrite.All', 'User.ReadWrite.All']
+      RETURN sp.display_name as app,
+             sp.app_id as app_id,
+             collect(perm.value) as dangerous_permissions,
+             sp.consent_type as consent_type
+    remediation: |
+      1. Entra ID → Enterprise Applications → Review unverified apps
+      2. Investigate each app's purpose and requester
+      3. Remove consent for suspicious apps
+      4. Restrict permissions to minimum required
+      5. Implement App Governance add-on for continuous monitoring
+    compliance_mapping:
+      - CIS-Azure-AD: "1.5.4"
+      - SOC2: CC6.6
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.5.4"
+
+  # ============================================================================
+  # CATEGORY 6: MONITORING & LOGGING (CIS 1.6.x)
+  # ============================================================================
+
+  - id: EID-MON-001
+    name: Diagnostic Logs Not Sent to SIEM
+    platform: entraid
+    severity: high
+    category: monitoring
+    cis_control: "1.6.1"
+    description: >
+      Entra ID diagnostic logs (Sign-in logs, Audit logs, Identity Protection logs)
+      must be exported to a SIEM or Log Analytics Workspace for continuous monitoring.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.diagnostic_logs_enabled = false
+         OR org.log_analytics_workspace_connected = false
+      RETURN org.tenant_name as tenant,
+             org.diagnostic_logs_enabled as logs_enabled,
+             org.log_analytics_workspace_connected as siem_connected
+    remediation: |
+      1. Entra ID → Monitoring → Diagnostic Settings
+      2. Add Diagnostic Setting:
+         - Name: "Send-to-SIEM"
+         - Logs: AuditLogs, SignInLogs, NonInteractiveUserSignInLogs,
+                 ServicePrincipalSignInLogs, RiskyUsers, UserRiskEvents
+      3. Destination: Log Analytics Workspace or Event Hub (for external SIEM)
+      4. Save setting
+    compliance_mapping:
+      - CIS-Azure-AD: "1.6.1"
+      - SOC2: CC7.2
+      - ISO27001: A.12.4.1
+      - NIST-800-53: AU-2
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.6.1"
+      - "https://learn.microsoft.com/en-us/entra/identity/monitoring-health/howto-configure-diagnostic-settings"
+
+  - id: EID-MON-002
+    name: Privileged Role Activation Not Alerting
+    platform: entraid
+    severity: high
+    category: monitoring
+    cis_control: "1.6.2"
+    description: >
+      Alerts must be configured for privileged role activations,
+      especially Global Administrator. Unexpected activations can
+      indicate compromised accounts.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (alert:AlertRule {platform: 'entraid'})
+        WHERE alert.target_action = 'roleActivation'
+          AND alert.is_enabled = true
+      }
+      RETURN org.tenant_name as tenant,
+             'No alert configured for privileged role activation' as finding
+    remediation: |
+      1. PIM → Azure AD Roles → Alerts → Review and enable alerts:
+         - "Roles are being activated too frequently"
+         - "Roles don't require MFA for activation"
+         - "Global admin count changed"
+      2. Additionally configure Microsoft Sentinel analytics rules
+      3. Set up email notifications for role activations
+    compliance_mapping:
+      - CIS-Azure-AD: "1.6.2"
+      - SOC2: CC7.3
+      - NIST-800-53: AU-6
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.6.2"
+
+  - id: EID-MON-003
+    name: Sign-in Risk Events Not Investigated
+    platform: entraid
+    severity: medium
+    category: monitoring
+    cis_control: "1.6.3"
+    description: >
+      High and medium risk sign-in events detected by Identity Protection
+      should be regularly reviewed and investigated.
+    detection_query: |
+      MATCH (event:RiskEvent {platform: 'entraid'})
+      WHERE event.risk_level IN ['high', 'medium']
+        AND event.risk_state = 'atRisk'
+        AND event.detected_date < datetime() - duration({days: 7})
+      RETURN event.user_principal_name as user,
+             event.risk_level as risk_level,
+             event.risk_event_type as event_type,
+             event.detected_date as detected,
+             'Unresolved risk event older than 7 days' as finding
+    remediation: |
+      1. Entra ID → Protection → Identity Protection → Risky sign-ins
+      2. Review all high-risk events
+      3. For each: Investigate or Confirm compromise / Dismiss
+      4. If compromised: Reset password, revoke sessions, enable MFA
+      5. Use Microsoft Sentinel for automated investigation playbooks
+    compliance_mapping:
+      - CIS-Azure-AD: "1.6.3"
+      - SOC2: CC7.2
+      - NIST-800-53: IR-5
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.6.3"
+
+  - id: EID-MON-004
+    name: Audit Log Retention Below 90 Days
+    platform: entraid
+    severity: medium
+    category: monitoring
+    cis_control: "1.6.4"
+    description: >
+      Entra ID audit logs are retained for 30 days by default (7 days for free tier).
+      Logs must be exported to ensure 90+ day retention for compliance.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.audit_log_retention_days < 90
+         OR org.log_export_configured = false
+      RETURN org.tenant_name as tenant,
+             org.audit_log_retention_days as retention_days,
+             org.log_export_configured as export_configured
+    remediation: |
+      1. Set up Log Analytics Workspace with 90+ day retention
+      2. Configure Diagnostic Settings to export all logs
+      3. Log Analytics → Usage and estimated costs → Data Retention
+      4. Set retention to minimum 90 days (365 days recommended)
+      5. Consider Microsoft Sentinel for extended retention and analysis
+    compliance_mapping:
+      - CIS-Azure-AD: "1.6.4"
+      - SOC2: CC7.2
+      - ISO27001: A.12.4.2
+      - NIST-800-53: AU-11
+      - GDPR: Article 30
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.6.4"
+
+  # ============================================================================
+  # CATEGORY 7: GROUP MANAGEMENT (CIS 1.7.x)
+  # ============================================================================
+
+  - id: EID-GRP-001
+    name: Self-Service Group Creation Not Restricted
+    platform: entraid
+    severity: low
+    category: group_management
+    cis_control: "1.7.1"
+    description: >
+      Users should not be able to create security groups without admin approval
+      to maintain proper governance over access control groups.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.users_can_create_security_groups = true
+         OR org.users_can_create_m365_groups = true
+      RETURN org.tenant_name as tenant,
+             org.users_can_create_security_groups as can_create_security,
+             org.users_can_create_m365_groups as can_create_m365
+    remediation: |
+      1. Entra ID → Groups → General Settings
+      2. "Users can create security groups in Azure portals": No
+      3. "Users can create Microsoft 365 groups in Azure portals": No
+      4. Assign group creation rights to specific admin roles only
+    compliance_mapping:
+      - CIS-Azure-AD: "1.7.1"
+      - SOC2: CC6.3
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.7.1"
+
+  - id: EID-GRP-002
+    name: Dynamic Group Membership Rules Not Reviewed
+    platform: entraid
+    severity: medium
+    category: group_management
+    cis_control: "1.7.2"
+    description: >
+      Dynamic group membership rules must be reviewed regularly to ensure
+      they don't grant unintended access to users based on attributes.
+    detection_query: |
+      MATCH (g:Group {platform: 'entraid', group_type: 'Dynamic'})
+      WHERE g.rule_last_reviewed_days_ago > 180
+         OR g.rule_last_reviewed_date IS NULL
+      RETURN g.display_name as group,
+             g.membership_rule as dynamic_rule,
+             g.rule_last_reviewed_days_ago as days_since_review,
+             g.member_count as current_members
+    remediation: |
+      1. Entra ID → Groups → Filter by "Dynamic" group type
+      2. Review membership rules for each dynamic group
+      3. Verify rules don't use easily-manipulated attributes (department, jobTitle)
+      4. Test rules: Groups → Dynamic Group → Validate Rules
+      5. Document review in change management system
+    compliance_mapping:
+      - CIS-Azure-AD: "1.7.2"
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.5
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.7.2"
+
+  # ============================================================================
+  # CATEGORY 8: DEVICE MANAGEMENT (CIS 1.8.x)
+  # ============================================================================
+
+  - id: EID-DEV-001
+    name: Stale Devices Not Removed from Entra ID
+    platform: entraid
+    severity: low
+    category: device_management
+    cis_control: "1.8.1"
+    description: >
+      Devices that have not checked in for 90+ days should be reviewed
+      and disabled/deleted to reduce the stale device attack surface.
+    detection_query: |
+      MATCH (d:Device {platform: 'entraid'})
+      WHERE d.is_enabled = true
+        AND d.approximate_last_sign_in_days_ago > 90
+      RETURN d.display_name as device,
+             d.device_id as device_id,
+             d.operating_system as os,
+             d.approximate_last_sign_in_days_ago as days_inactive,
+             d.registered_owner as owner
+    remediation: |
+      1. Entra ID → Devices → Configure stale device cleanup
+      2. Review devices inactive for 90+ days
+      3. Verify with device owners if still in use
+      4. Disable devices no longer needed
+      5. Delete after 30-day grace period
+      6. Enable automatic stale device cleanup rule
+    compliance_mapping:
+      - CIS-Azure-AD: "1.8.1"
+      - SOC2: CC6.6
+      - NIST-800-53: CM-8
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.8.1"
+
+  - id: EID-DEV-002
+    name: Device Registration Not Restricted to Managed Devices
+    platform: entraid
+    severity: medium
+    category: device_management
+    cis_control: "1.8.2"
+    description: >
+      Device registration should be restricted to prevent unmanaged
+      personal devices from joining the corporate Entra ID tenant.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.users_may_register_devices = 'All'
+         OR org.maximum_devices_per_user > 10
+         OR org.maximum_devices_per_user IS NULL
+      RETURN org.tenant_name as tenant,
+             org.users_may_register_devices as registration_policy,
+             org.maximum_devices_per_user as max_devices
+    remediation: |
+      1. Entra ID → Devices → Device Settings
+      2. "Users may register their devices": Set to specific group or None
+      3. "Maximum number of devices per user": Set to 5 or less
+      4. Require admin approval for device registration
+    compliance_mapping:
+      - CIS-Azure-AD: "1.8.2"
+      - SOC2: CC6.6
+      - NIST-800-53: CM-8
+    references:
+      - "CIS Microsoft Azure AD Benchmark v2.0 - Control 1.8.2"
+
+  # ============================================================================
+  # CATEGORY 9: IDENTITY PROTECTION (Microsoft Best Practices)
+  # ============================================================================
+
+  - id: EID-IDP-001
+    name: Identity Protection License Not Used
+    platform: entraid
+    severity: medium
+    category: identity_protection
+    description: >
+      Microsoft Entra ID Identity Protection (requires P2 license) provides
+      risk-based policies and leaked credential detection that significantly
+      improve security posture.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.identity_protection_enabled = false
+         OR org.p2_license_count = 0
+      RETURN org.tenant_name as tenant,
+             org.p2_license_count as p2_licenses,
+             'Identity Protection not enabled' as finding
+    remediation: |
+      1. Purchase Azure AD Premium P2 licenses for admin accounts at minimum
+      2. Entra ID → Protection → Identity Protection
+      3. Enable User risk policy
+      4. Enable Sign-in risk policy
+      5. Configure notifications for high-risk users
+    compliance_mapping:
+      - Microsoft-Best-Practices: Identity-Protection
+      - NIST-800-53: IA-2(12)
+    references:
+      - "https://learn.microsoft.com/en-us/entra/id-protection/overview-identity-protection"
+
+  - id: EID-IDP-002
+    name: Leaked Credentials Not Monitored
+    platform: entraid
+    severity: critical
+    category: identity_protection
+    description: >
+      Entra ID Identity Protection monitors for leaked/compromised credentials
+      across the internet. Users with leaked credentials should be immediately
+      remediated.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})
+      WHERE u.risk_state = 'atRisk'
+        AND u.risk_detail CONTAINS 'leaked'
+        AND u.risk_remediated = false
+      RETURN u.display_name as user,
+             u.user_principal_name as upn,
+             u.risk_level as risk_level,
+             u.risk_last_updated as detected_date
+    remediation: |
+      1. Entra ID → Protection → Identity Protection → Risky Users
+      2. Filter by "Risk Level: High" and "Risk State: At risk"
+      3. For each user:
+         a. Confirm compromise if verified
+         b. Reset password immediately
+         c. Revoke all sessions: Users → Revoke sessions
+         d. Require MFA re-registration
+      4. Investigate how credentials were leaked
+    compliance_mapping:
+      - Microsoft-Best-Practices: Identity-Protection
+      - SOC2: CC7.3
+      - NIST-800-53: IR-4
+    references:
+      - "https://learn.microsoft.com/en-us/entra/id-protection/howto-identity-protection-remediate-unblock"
+
+  - id: EID-IDP-003
+    name: Password Protection Not Configured
+    platform: entraid
+    severity: medium
+    category: identity_protection
+    description: >
+      Entra ID Password Protection should be enabled to block known weak
+      passwords and organization-specific banned passwords.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE org.password_protection_enabled = false
+         OR org.custom_banned_passwords_list IS NULL
+      RETURN org.tenant_name as tenant,
+             org.password_protection_enabled as protection_enabled,
+             'Custom banned password list not configured' as finding
+    remediation: |
+      1. Entra ID → Protection → Authentication Methods → Password Protection
+      2. Enable "Enforce custom list"
+      3. Add organization-specific terms to banned password list
+         (company name, product names, local terms)
+      4. Set "Lockout threshold" to 10 or less
+      5. For hybrid: Deploy Azure AD Password Protection agent on-premises
+    compliance_mapping:
+      - Microsoft-Best-Practices: Password-Protection
+      - CIS-Azure-AD: "1.4.1"
+      - NIST-800-53: IA-5(1)
+    references:
+      - "https://learn.microsoft.com/en-us/entra/identity/authentication/concept-password-ban-bad"
+
+  # ============================================================================
+  # CATEGORY 10: ACCESS REVIEWS & GOVERNANCE (Microsoft Best Practices)
+  # ============================================================================
+
+  - id: EID-GOV-001
+    name: Access Reviews Not Configured for Privileged Roles
+    platform: entraid
+    severity: high
+    category: governance
+    description: >
+      Periodic access reviews must be configured for privileged role assignments
+      to ensure only authorized users retain sensitive access.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (review:AccessReview {platform: 'entraid'})
+        WHERE review.scope CONTAINS 'privilegedRole'
+          AND review.is_active = true
+          AND review.frequency IN ['weekly', 'monthly', 'quarterly']
+      }
+      RETURN org.tenant_name as tenant,
+             'No access review configured for privileged roles' as finding
+    remediation: |
+      1. Requires Azure AD Premium P2
+      2. Entra ID → Identity Governance → Access Reviews → New Access Review
+      3. Scope: "Teams + Groups" or "Azure AD Roles"
+      4. Select: All privileged roles
+      5. Reviewers: Managers or specific reviewers
+      6. Frequency: Quarterly minimum (monthly for Global Admin)
+      7. If no response: Auto-remove access (deny)
+    compliance_mapping:
+      - Microsoft-Best-Practices: Governance
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.5
+      - NIST-800-53: AC-2(7)
+    references:
+      - "https://learn.microsoft.com/en-us/entra/id-governance/access-reviews-overview"
+
+  - id: EID-GOV-002
+    name: Entitlement Management Not Used for External Access
+    platform: entraid
+    severity: medium
+    category: governance
+    description: >
+      External user access should be managed through Entra ID Entitlement
+      Management access packages to ensure time-limited and governed access.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid', user_type: 'Guest'})
+      WHERE NOT EXISTS {
+        MATCH (pkg:AccessPackage {platform: 'entraid'})
+        WHERE pkg.assigned_to = u.object_id
+      }
+      WITH count(u) as unmanaged_guests
+      WHERE unmanaged_guests > 0
+      RETURN unmanaged_guests,
+             'Guest users without Entitlement Management access packages' as finding
+    remediation: |
+      1. Entra ID → Identity Governance → Entitlement Management
+      2. Create Access Packages for external collaboration scenarios
+      3. Set expiration policies (90 days, 1 year based on need)
+      4. Require access reviews for renewal
+      5. Migrate existing guest access to access packages
+    compliance_mapping:
+      - Microsoft-Best-Practices: Governance
+      - SOC2: CC6.2
+      - ISO27001: A.9.2.6
+    references:
+      - "https://learn.microsoft.com/en-us/entra/id-governance/entitlement-management-overview"
+
+  - id: EID-GOV-003
+    name: Terms of Use Not Configured
+    platform: entraid
+    severity: low
+    category: governance
+    description: >
+      Terms of Use policies should be configured and enforced through
+      Conditional Access to ensure users acknowledge security policies.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (tou:TermsOfUse {platform: 'entraid'})
+        WHERE tou.is_active = true
+      }
+      RETURN org.tenant_name as tenant,
+             'No Terms of Use policy configured' as finding
+    remediation: |
+      1. Entra ID → Protection → Conditional Access → Terms of Use
+      2. Create a Terms of Use document (PDF)
+      3. Upload and configure display settings
+      4. Create Conditional Access policy requiring Terms acceptance
+      5. Set re-acceptance frequency (annual)
+    compliance_mapping:
+      - Microsoft-Best-Practices: Governance
+      - GDPR: Article 7
+      - SOC2: CC9.2
+    references:
+      - "https://learn.microsoft.com/en-us/entra/identity/conditional-access/terms-of-use"
+
+  # ============================================================================
+  # CATEGORY 11: CROSS-PLATFORM (Identity Correlation)
+  # ============================================================================
+
+  - id: EID-XPLAT-001
+    name: Same Identity with Different Privileges Across Platforms
+    platform: entraid
+    severity: medium
+    category: cross_platform
+    description: >
+      Users with high privileges in Entra ID should be cross-referenced
+      with GitHub and Jira to identify users with elevated access across
+      all platforms (excessive multi-platform privilege).
+    detection_query: |
+      MATCH (u1:User {platform: 'entraid'})-[:FEDERATED_IDENTITY]->(u2:User)
+      MATCH (u1)-[:HAS_ROLE]->(r1:DirectoryRole {is_privileged: true})
+      MATCH (u2)-[:HAS_ROLE]->(r2)
+      WHERE r2.role IN ['Owner', 'Admin', 'Administrator']
+      RETURN u1.user_principal_name as entra_identity,
+             u2.platform as other_platform,
+             u2.username as platform_username,
+             r1.display_name as entra_role,
+             r2.role as platform_role,
+             'Highly privileged across multiple platforms' as alert
+    remediation: |
+      1. Review users with admin access across multiple platforms
+      2. Apply principle of least privilege per platform
+      3. Ensure privileged access is business-justified on each platform
+      4. Consider using platform-specific service accounts for admin tasks
+      5. Implement cross-platform access reviews quarterly
+    compliance_mapping:
+      - NIST-800-53: AC-6
+      - SOC2: CC6.3
+    references:
+      - "Microsoft Zero Trust Security Model"
+
+  - id: EID-XPLAT-002
+    name: Entra ID User Not Found in Corporate Directory
+    platform: entraid
+    severity: high
+    category: cross_platform
+    description: >
+      Active Entra ID users that do not exist in the corporate HR system
+      may be orphaned accounts, former employees, or unauthorized accounts.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})
+      WHERE u.is_active = true
+        AND u.hr_system_synced = false
+        AND u.user_type = 'Member'
+        AND u.account_type <> 'ServiceAccount'
+      RETURN u.display_name as user,
+             u.user_principal_name as upn,
+             u.created_date as created,
+             u.last_sign_in_days_ago as last_active,
+             'Not found in HR system' as alert
+    remediation: |
+      1. Cross-reference Entra ID users with HR system
+      2. Investigate users not in HR system
+      3. If former employee: Immediately disable and revoke sessions
+      4. If contractor: Ensure proper account lifecycle management
+      5. Implement automated HR-driven provisioning (SCIM)
+    compliance_mapping:
+      - SOC2: CC6.2
+      - ISO27001: A.9.2.6
+      - NIST-800-53: AC-2
+    references:
+      - "Microsoft Identity Governance Best Practices"
+
+metadata:
+  version: "1.0"
+  last_updated: "2026-04-30"
+  author: "SSPM Platform - Entra ID Security Rules"
+  source_references:
+    - "CIS Microsoft Azure Active Directory Benchmark v2.0"
+    - "Microsoft Security Best Practices"
+    - "Microsoft Zero Trust Security Model"
+    - "NIST SP 800-53 Rev 5"
+  total_rules: 50
+  severity_breakdown:
+    critical: 5
+    high: 18
+    medium: 19
+    low: 8
+  rule_categories:
+    authentication: 5
+    identity_management: 6
+    conditional_access: 4
+    user_security: 3
+    application_security: 4
+    monitoring: 4
+    group_management: 2
+    device_management: 2
+    identity_protection: 3
+    governance: 3
+    cross_platform: 2
+  api_limitations:
+    - rule_id: EID-AUTH-001
+      limitation: "MFA status per user requires Microsoft Graph API with UserAuthenticationMethod.Read.All"
+    - rule_id: EID-AUTH-003
+      limitation: "Legacy auth block status requires Conditional Access Graph API"
+    - rule_id: EID-MON-001
+      limitation: "Diagnostic settings require Azure Monitor API"
+    - rule_id: EID-IDP-002
+      limitation: "Risk events require Identity Protection API (P2 license)"
+  required_api_permissions:
+    - "User.Read.All"
+    - "Directory.Read.All"
+    - "Policy.Read.All"
+    - "AuditLog.Read.All"
+    - "IdentityRiskyUser.Read.All"
+    - "DeviceManagementManagedDevices.Read.All"
+    - "RoleManagement.Read.Directory"
+    - "PrivilegedAccess.Read.AzureAD"

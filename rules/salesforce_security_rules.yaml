@@ -1,0 +1,1082 @@
+---
+# Salesforce Security Detection Rules
+# Based on: CSA Critical Controls for Salesforce & Salesforce Security Health Check
+# Platform: Salesforce
+# Total Rules: 45
+
+rules:
+  # ============================================================================
+  # CATEGORY: Authentication & Access Control (USR01, USR07)
+  # ============================================================================
+  
+  - id: SF-AUTH-001
+    name: Multi-Factor Authentication Not Enforced
+    platform: salesforce
+    severity: critical
+    category: authentication
+    description: Multi-factor authentication (MFA) must be enforced for all users to prevent unauthorized access through compromised credentials.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})
+      WHERE u.mfa_enabled = false OR u.mfa_enabled IS NULL
+      RETURN u.username as user, u.email as email, u.is_active as active
+    remediation: |
+      1. Navigate to Setup → Identity → Multi-Factor Authentication
+      2. Enable "Require Multi-Factor Authentication (MFA) for all direct UI logins to your Salesforce org"
+      3. Choose strong MFA methods (Salesforce Authenticator app, TOTP-based authenticators)
+      4. Avoid weak factors like email or SMS
+      5. Communicate changes to users before enforcement
+    compliance_mapping:
+      - SOC2: CC6.1
+      - ISO27001: A.9.4.2
+      - NIST-800-53: IA-2(1)
+      - CIS-Controls: 6.5
+    references:
+      - "CSA Critical Controls: USR01 - Secure Authentication"
+      - "https://help.salesforce.com/s/articleView?id=sf.security_mfa.htm"
+    
+  - id: SF-AUTH-002
+    name: Weak Password Policy
+    platform: salesforce
+    severity: high
+    category: authentication
+    description: Organization-wide password policy must enforce strong password requirements including minimum length, complexity, and history.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.password_min_length < 8 
+         OR org.password_complexity = 'No restriction'
+         OR org.password_history_restriction < 3
+         OR org.password_max_age > 90
+      RETURN org.name as organization,
+             org.password_min_length as min_length,
+             org.password_complexity as complexity,
+             org.password_history_restriction as history,
+             org.password_max_age as max_age_days
+    remediation: |
+      1. Go to Setup → Security → Password Policies
+      2. Set minimum password length to at least 8 characters (12+ recommended)
+      3. Set password complexity to "Must mix alpha and numeric" or higher
+      4. Configure password history restriction to at least 3 passwords
+      5. Set maximum password age to 90 days or less
+      6. Enable "User passwords expire in" setting
+    compliance_mapping:
+      - SOC2: CC6.1
+      - ISO27001: A.9.4.3
+      - NIST-800-53: IA-5(1)
+      - PCI-DSS: 8.2.3
+    references:
+      - "CSA Critical Controls: USR01 - Secure Authentication"
+      
+  - id: SF-AUTH-003
+    name: Single Sign-On Not Configured
+    platform: salesforce
+    severity: medium
+    category: authentication
+    description: Single Sign-On (SSO) should be configured to centralize authentication and improve security through identity federation.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.sso_enabled = false OR org.sso_enabled IS NULL
+      RETURN org.name as organization, org.domain as domain
+    remediation: |
+      1. Go to Setup → Identity → Single Sign-On Settings
+      2. Configure SAML-based SSO with your identity provider
+      3. Test SSO configuration in sandbox first
+      4. Enable "SAML Enabled" checkbox
+      5. Consider using Identity Connect for AD/LDAP integration
+    compliance_mapping:
+      - SOC2: CC6.1
+      - ISO27001: A.9.4.2
+    references:
+      - "CSA Critical Controls: USR01, USR07"
+      
+  - id: SF-AUTH-004
+    name: Login IP Restrictions Not Configured
+    platform: salesforce
+    severity: medium
+    category: authentication
+    description: Login IP restrictions should be configured on profiles to limit access from trusted networks only.
+    detection_query: |
+      MATCH (p:Profile {platform: 'salesforce'})
+      WHERE NOT EXISTS(p.login_ip_ranges) OR size(p.login_ip_ranges) = 0
+      RETURN p.name as profile, count(p) as affected_profiles
+    remediation: |
+      1. Navigate to Setup → Users → Profiles
+      2. Select each profile requiring IP restrictions
+      3. Click "Login IP Ranges" and add trusted IP ranges
+      4. Consider business hours restrictions for additional security
+      5. Test thoroughly before production deployment
+    compliance_mapping:
+      - SOC2: CC6.6
+      - ISO27001: A.13.1.1
+    references:
+      - "CSA Critical Controls: USR01 - Improved Security"
+
+  # ============================================================================
+  # CATEGORY: User Management (USR02, USR06)
+  # ============================================================================
+  
+  - id: SF-USER-001
+    name: Inactive User Accounts Not Disabled
+    platform: salesforce
+    severity: high
+    category: user_management
+    description: User accounts that have been inactive for extended periods should be deactivated to prevent unauthorized access.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})
+      WHERE u.is_active = true 
+        AND u.last_login_days_ago > 90
+      RETURN u.username as user, 
+             u.email as email,
+             u.last_login_days_ago as days_inactive,
+             u.profile as profile
+    remediation: |
+      1. Review list of inactive users with HR/managers
+      2. Navigate to Setup → Users → Users
+      3. Edit inactive user accounts
+      4. Uncheck "Active" checkbox to deactivate
+      5. Consider freezing users first to retain record ownership
+      6. Document deactivation in compliance logs
+    compliance_mapping:
+      - SOC2: CC6.2
+      - ISO27001: A.9.2.5, A.9.2.6
+      - NIST-800-53: AC-2(3)
+      - PCI-DSS: 8.1.4
+    references:
+      - "CSA Critical Controls: USR02 - User Accounts Management"
+      
+  - id: SF-USER-002
+    name: Sandbox User Accounts Not Sanitized
+    platform: salesforce
+    severity: high
+    category: user_management
+    description: Production user accounts must be changed or deactivated when creating non-production sandboxes.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})
+      WHERE u.environment_type = 'sandbox' 
+        AND u.is_active = true
+        AND u.email CONTAINS '@'
+        AND NOT u.email CONTAINS '.invalid'
+      RETURN u.username as user,
+             u.email as production_email,
+             u.sandbox_name as sandbox
+    remediation: |
+      1. After sandbox refresh, immediately run user sanitization
+      2. Deactivate all sandbox user accounts
+      3. Append ".invalid" to all email addresses to prevent email delivery
+      4. Create new admin user with sandbox-specific credentials
+      5. Use Salesforce Data Mask for sensitive field obfuscation
+    compliance_mapping:
+      - SOC2: CC6.2
+      - ISO27001: A.9.2.6
+      - GDPR: Article 25
+    references:
+      - "CSA Critical Controls: USR02 - User Accounts Management"
+      
+  - id: SF-USER-003
+    name: No Centralized Identity Management
+    platform: salesforce
+    severity: medium
+    category: user_management
+    description: User provisioning and deprovisioning should be centralized using company-wide identity management system.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.scim_enabled = false 
+        AND org.identity_connect_enabled = false
+      RETURN org.name as organization, org.user_count as total_users
+    remediation: |
+      1. Evaluate SCIM (System for Cross-domain Identity Management) integration
+      2. Configure Salesforce Identity Connect for AD/LDAP sync
+      3. Implement automated user provisioning/deprovisioning workflows
+      4. Connect to existing IAM solutions (Okta, Azure AD, OneLogin)
+      5. Test in sandbox before production deployment
+    compliance_mapping:
+      - SOC2: CC6.2
+      - ISO27001: A.9.2.1
+    references:
+      - "CSA Critical Controls: USR02, USR06"
+
+  # ============================================================================
+  # CATEGORY: Authorization & Permissions (USR03, USR05)
+  # ============================================================================
+  
+  - id: SF-AUTHZ-001
+    name: Excessive Administrative Users
+    platform: salesforce
+    severity: high
+    category: authorization
+    description: The number of users with System Administrator profile should be limited following least privilege principle.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})-[:HAS_PROFILE]->(p:Profile)
+      WHERE p.name = 'System Administrator' 
+        AND u.is_active = true
+      WITH count(u) as admin_count
+      WHERE admin_count > 5
+      RETURN admin_count as total_admins,
+             'Exceeds recommended threshold of 5' as finding
+    remediation: |
+      1. Review all System Administrator users with stakeholders
+      2. Create custom profiles with specific required permissions
+      3. Use Permission Sets for temporary elevated access
+      4. Migrate users to least-privilege profiles
+      5. Document business justification for each admin account
+      6. Implement periodic access reviews
+    compliance_mapping:
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.3
+      - NIST-800-53: AC-6
+      - PCI-DSS: 7.1.2
+    references:
+      - "CSA Critical Controls: USR03 - Role-Based Access Control"
+      
+  - id: SF-AUTHZ-002
+    name: '"View All Data" Permission Granted Excessively'
+    platform: salesforce
+    severity: critical
+    category: authorization
+    description: The "View All Data" permission bypasses all sharing rules and should be granted only when absolutely necessary.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})-[:HAS_PERMISSION]->(perm:Permission)
+      WHERE perm.name = 'ViewAllData' 
+        AND u.is_active = true
+        AND NOT u.profile IN ['System Administrator']
+      RETURN u.username as user,
+             u.profile as profile,
+             u.email as email
+    remediation: |
+      1. Review business justification for each user
+      2. Remove "View All Data" from profiles and permission sets
+      3. Use sharing rules and role hierarchy instead
+      4. Create reports with running user context if needed
+      5. Implement quarterly access reviews for this permission
+    compliance_mapping:
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.3
+      - NIST-800-53: AC-6(5)
+      - GDPR: Article 32
+    references:
+      - "CSA Critical Controls: USR03 - Role-Based Access Control"
+      
+  - id: SF-AUTHZ-003
+    name: '"Modify All Data" Permission Granted Excessively'
+    platform: salesforce
+    severity: critical
+    category: authorization
+    description: The "Modify All Data" permission allows modification of all org data and should be extremely restricted.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})-[:HAS_PERMISSION]->(perm:Permission)
+      WHERE perm.name = 'ModifyAllData' 
+        AND u.is_active = true
+        AND NOT u.profile IN ['System Administrator']
+      RETURN u.username as user,
+             u.profile as profile,
+             u.email as email
+    remediation: |
+      1. Immediately review all users with this permission
+      2. Remove unless absolutely required and documented
+      3. Use specific object-level permissions instead
+      4. Implement approval workflow for temporary grants
+      5. Enable Event Monitoring to track data modifications
+    compliance_mapping:
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.3
+      - NIST-800-53: AC-6(5)
+      - PCI-DSS: 7.1.2
+    references:
+      - "CSA Critical Controls: USR03"
+      
+  - id: SF-AUTHZ-004
+    name: '"Author Apex" Permission Granted to Non-Developers'
+    platform: salesforce
+    severity: high
+    category: authorization
+    description: The "Author Apex" permission allows code deployment and should only be granted to development teams.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})-[:HAS_PERMISSION]->(perm:Permission)
+      WHERE perm.name = 'AuthorApex' 
+        AND u.is_active = true
+        AND NOT u.role CONTAINS 'Developer'
+      RETURN u.username as user,
+             u.profile as profile,
+             u.role as role
+    remediation: |
+      1. Create dedicated developer profiles
+      2. Remove "Author Apex" from non-developer users
+      3. Implement code review and deployment controls
+      4. Use version control (Git) for all Apex code
+      5. Restrict production deployment to CI/CD pipelines
+    compliance_mapping:
+      - SOC2: CC8.1
+      - ISO27001: A.12.1.4
+    references:
+      - "CSA Critical Controls: APP06 - Secure Extensions"
+      
+  - id: SF-AUTHZ-005
+    name: Segregation of Duties Conflicts
+    platform: salesforce
+    severity: high
+    category: authorization
+    description: Users should not have conflicting permissions that violate segregation of duties principles.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})-[:HAS_PERMISSION]->(p1:Permission),
+            (u)-[:HAS_PERMISSION]->(p2:Permission)
+      WHERE (p1.name = 'CreateAccounts' AND p2.name = 'DeleteAccounts')
+         OR (p1.name = 'ManageUsers' AND p2.name = 'ViewSetup')
+      RETURN u.username as user,
+             u.profile as profile,
+             collect(DISTINCT p1.name + ', ' + p2.name) as conflicting_permissions
+    remediation: |
+      1. Define SOD matrix for your organization
+      2. Identify and document all SOD conflicts
+      3. Implement preventive SOD checks in provisioning workflow
+      4. Use permission sets for temporary conflict resolution
+      5. Enable continuous SOD monitoring
+    compliance_mapping:
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.3
+      - NIST-800-53: AC-5
+      - PCI-DSS: 6.5.8
+    references:
+      - "CSA Critical Controls: USR05 - Segregation of Duties"
+
+  # ============================================================================
+  # CATEGORY: Emergency Access (USR04)
+  # ============================================================================
+  
+  - id: SF-EMERG-001
+    name: Emergency Access Accounts Not Properly Managed
+    platform: salesforce
+    severity: high
+    category: emergency_access
+    description: Emergency access accounts must be identified, secured, and monitored for unauthorized usage.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})
+      WHERE u.username CONTAINS 'emergency' 
+         OR u.username CONTAINS 'fireglass'
+         OR u.username CONTAINS 'breakglass'
+      AND (u.password_complexity < 'high' OR NOT EXISTS(u.stored_in_vault))
+      RETURN u.username as emergency_account,
+             u.password_complexity as password_strength,
+             u.stored_in_vault as vault_managed
+    remediation: |
+      1. Identify all emergency/break-glass accounts
+      2. Store credentials in enterprise password vault
+      3. Enforce complex passwords (16+ characters)
+      4. Restrict IP access to specific jump servers
+      5. Implement real-time monitoring for emergency account usage
+      6. Require service tickets for emergency access
+    compliance_mapping:
+      - SOC2: CC6.2
+      - ISO27001: A.9.4.3
+      - NIST-800-53: AC-7
+    references:
+      - "CSA Critical Controls: USR04 - Emergency Access"
+      
+  - id: SF-EMERG-002
+    name: Emergency Account Login Not Monitored
+    platform: salesforce
+    severity: high
+    category: emergency_access
+    description: Emergency account logins must be monitored and alerted in real-time using Event Monitoring or Setup Audit Trail.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})-[:LOGGED_IN]->(login:LoginEvent)
+      WHERE u.is_emergency_account = true
+        AND login.timestamp > datetime() - duration({days: 1})
+        AND NOT EXISTS(login.service_ticket_reference)
+      RETURN u.username as emergency_account,
+             login.timestamp as login_time,
+             login.source_ip as source_ip,
+             'No service ticket referenced' as alert
+    remediation: |
+      1. Enable Salesforce Event Monitoring (requires license)
+      2. Create Transaction Security policies for emergency accounts
+      3. Configure SIEM integration for Login Events
+      4. Set up real-time alerts for emergency account usage
+      5. Implement mandatory ticket validation
+      6. Review emergency access logs weekly
+    compliance_mapping:
+      - SOC2: CC7.2
+      - ISO27001: A.12.4.1
+    references:
+      - "CSA Critical Controls: USR04 - Emergency Access"
+
+  # ============================================================================
+  # CATEGORY: Session & Account Security (USR07)
+  # ============================================================================
+  
+  - id: SF-SESS-001
+    name: Session Timeout Too Long
+    platform: salesforce
+    severity: medium
+    category: session_security
+    description: Session timeout should be configured to automatically log out inactive users to prevent session hijacking.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.session_timeout_minutes > 120 
+         OR org.session_timeout_minutes IS NULL
+      RETURN org.name as organization,
+             org.session_timeout_minutes as current_timeout,
+             'Should be <= 120 minutes' as recommendation
+    remediation: |
+      1. Go to Setup → Session Settings
+      2. Set "Timeout value" to 2 hours or less
+      3. Enable "Disable session timeout warning popup"
+      4. Configure "Force logout on session timeout"
+      5. Consider shorter timeouts for high-privilege profiles
+    compliance_mapping:
+      - SOC2: CC6.1
+      - ISO27001: A.9.4.2
+      - NIST-800-53: AC-12
+    references:
+      - "CSA Critical Controls: USR07 - Accounts Security"
+      
+  - id: SF-SESS-002
+    name: '"Login-As" Feature Not Restricted'
+    platform: salesforce
+    severity: high
+    category: session_security
+    description: The "Login As Any User" feature allows administrators to impersonate users and must be controlled and monitored.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})-[:PERFORMED_ACTION]->(action:AuditEvent)
+      WHERE action.action_type = 'LoginAs'
+        AND action.timestamp > datetime() - duration({days: 30})
+      WITH u, count(action) as login_as_count
+      WHERE login_as_count > 10
+      RETURN u.username as admin_user,
+             login_as_count as times_used,
+             'Excessive usage' as alert
+    remediation: |
+      1. Document policy for "Login As" usage
+      2. Require approval workflow before usage
+      3. Monitor Setup Audit Trail for "Logged in as another user" events
+      4. Set up alerts for any "Login As" activity
+      5. Review usage quarterly with security team
+      6. Consider disabling for non-critical environments
+    compliance_mapping:
+      - SOC2: CC6.7
+      - ISO27001: A.9.4.5
+    references:
+      - "CSA Critical Controls: USR03 - Role-Based Access Control"
+
+  # ============================================================================
+  # CATEGORY: Application Security (APP02, APP03, APP06)
+  # ============================================================================
+  
+  - id: SF-APP-001
+    name: Salesforce Security Health Check Score Below 70%
+    platform: salesforce
+    severity: high
+    category: application_security
+    description: Salesforce Health Check should score at least 70% (baseline) or 80% (standard) to indicate proper security configuration.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.health_check_score < 70
+      RETURN org.name as organization,
+             org.health_check_score as current_score,
+             'Below baseline standard' as finding
+    remediation: |
+      1. Run Health Check: Setup → Security → Security Health Check
+      2. Review all medium and high-risk settings
+      3. Click "Fix Risks" and follow recommendations
+      4. Address custom risks based on organizational policies
+      5. Re-run Health Check to verify improvements
+      6. Schedule monthly Health Check reviews
+    compliance_mapping:
+      - SOC2: CC6.6
+      - ISO27001: A.12.6.1
+    references:
+      - "CSA Critical Controls: APP02 - Secure Baseline Configurations"
+      
+  - id: SF-APP-002
+    name: Critical Security Updates Not Activated
+    platform: salesforce
+    severity: critical
+    category: application_security
+    description: Salesforce releases security updates that must be tested and activated to patch known vulnerabilities.
+    detection_query: |
+      MATCH (update:SecurityUpdate {platform: 'salesforce'})
+      WHERE update.status = 'Available'
+        AND update.severity = 'Critical'
+        AND update.days_available > 60
+      RETURN update.name as update_name,
+             update.release_date as released,
+             update.auto_activate_date as auto_activation_date,
+             update.description as description
+    remediation: |
+      1. Navigate to Setup → Security → Critical Updates
+      2. Review each available critical update
+      3. Test update in sandbox environment
+      4. Activate during maintenance window
+      5. Subscribe to Salesforce Security Advisories
+      6. Set up alerts for new security updates
+    compliance_mapping:
+      - SOC2: CC7.1
+      - ISO27001: A.12.6.1
+      - NIST-800-53: SI-2
+    references:
+      - "CSA Critical Controls: APP03 - Security Vulnerabilities"
+      
+  - id: SF-APP-003
+    name: Insecure Apex Code Detected
+    platform: salesforce
+    severity: high
+    category: application_security
+    description: Custom Apex code must follow secure coding practices including proper CRUD/FLS checks and SOQL injection prevention.
+    detection_query: |
+      MATCH (apex:ApexClass {platform: 'salesforce'})
+      WHERE apex.sharing_mode = 'without sharing'
+         OR apex.has_soql_injection_risk = true
+         OR apex.missing_crud_checks = true
+      RETURN apex.name as class_name,
+             apex.sharing_mode as sharing,
+             apex.has_soql_injection_risk as soql_risk,
+             apex.missing_crud_checks as missing_crud
+    remediation: |
+      1. Review Apex code for security vulnerabilities
+      2. Use "with sharing" keyword for all classes
+      3. Implement CRUD/FLS checks using Security.stripInaccessible()
+      4. Parameterize SOQL queries to prevent injection
+      5. Use static code analysis tools (Checkmarx, PMD)
+      6. Conduct code reviews before deployment
+    compliance_mapping:
+      - SOC2: CC8.1
+      - ISO27001: A.14.2.5
+      - OWASP-Top-10: A1, A3
+    references:
+      - "CSA Critical Controls: APP06 - Secure Extensions"
+      
+  - id: SF-APP-004
+    name: Unreviewed AppExchange Packages Installed
+    platform: salesforce
+    severity: medium
+    category: application_security
+    description: Third-party AppExchange applications should undergo security review before installation.
+    detection_query: |
+      MATCH (app:InstalledPackage {platform: 'salesforce'})
+      WHERE NOT EXISTS(app.security_review_date)
+         OR app.security_review_date < datetime() - duration({months: 12})
+      RETURN app.name as package_name,
+             app.namespace as namespace,
+             app.version as version,
+             app.installed_date as installed_date
+    remediation: |
+      1. Inventory all installed AppExchange packages
+      2. Review package security documentation
+      3. Check Salesforce Security Review status
+      4. Conduct risk assessment for each package
+      5. Remove unused packages
+      6. Install packages for admins only, then assign permissions
+    compliance_mapping:
+      - SOC2: CC6.6
+      - ISO27001: A.12.5.1
+    references:
+      - "CSA Critical Controls: APP06 - Secure Extensions"
+
+  # ============================================================================
+  # CATEGORY: Data Protection (DAT01, DAT02, DAT03)
+  # ============================================================================
+  
+  - id: SF-DATA-001
+    name: Sensitive Data Not Encrypted at Rest
+    platform: salesforce
+    severity: high
+    category: data_protection
+    description: Sensitive data fields should be encrypted using Salesforce Shield Platform Encryption.
+    detection_query: |
+      MATCH (field:CustomField {platform: 'salesforce'})
+      WHERE field.data_classification IN ['Confidential', 'Restricted', 'PII']
+        AND field.is_encrypted = false
+      RETURN field.object_name as object,
+             field.field_name as field,
+             field.data_classification as classification
+    remediation: |
+      1. Purchase Salesforce Shield if not already licensed
+      2. Navigate to Setup → Platform Encryption
+      3. Generate or import tenant secret
+      4. Select fields containing sensitive data for encryption
+      5. Test encryption in sandbox first
+      6. Enable encryption and monitor impact
+    compliance_mapping:
+      - SOC2: CC6.7
+      - ISO27001: A.10.1.1
+      - GDPR: Article 32
+      - HIPAA: 164.312(a)(2)(iv)
+    references:
+      - "CSA Critical Controls: DAT03 - Data Encryption"
+      
+  - id: SF-DATA-002
+    name: Field History Tracking Not Enabled for Sensitive Fields
+    platform: salesforce
+    severity: medium
+    category: data_protection
+    description: Field history tracking should be enabled for fields containing sensitive data to maintain audit trail.
+    detection_query: |
+      MATCH (field:CustomField {platform: 'salesforce'})
+      WHERE field.data_classification IN ['Confidential', 'Restricted']
+        AND field.history_tracking_enabled = false
+      RETURN field.object_name as object,
+             field.field_name as field,
+             field.data_classification as classification
+    remediation: |
+      1. Navigate to Setup → Object Manager
+      2. Select object containing sensitive fields
+      3. Go to "Fields & Relationships"
+      4. Click "Set History Tracking"
+      5. Enable tracking for relevant fields (max 20 per object)
+      6. Monitor field history in reports
+    compliance_mapping:
+      - SOC2: CC7.2
+      - ISO27001: A.12.4.1
+      - GDPR: Article 30
+    references:
+      - "CSA Critical Controls: DAT01 - Continuous Monitoring"
+      
+  - id: SF-DATA-003
+    name: Production Data Copied to Sandbox Without Masking
+    platform: salesforce
+    severity: critical
+    category: data_protection
+    description: Sensitive production data must be masked when copied to sandbox environments to prevent data exposure.
+    detection_query: |
+      MATCH (sandbox:Sandbox {platform: 'salesforce'})
+      WHERE sandbox.contains_production_data = true
+        AND sandbox.data_masking_applied = false
+      RETURN sandbox.name as sandbox_name,
+             sandbox.sandbox_type as type,
+             sandbox.last_refresh_date as last_refresh
+    remediation: |
+      1. Purchase Salesforce Data Mask (sandbox add-on)
+      2. Create data masking templates for sensitive fields
+      3. Run Data Mask after each sandbox refresh
+      4. Verify email addresses changed to .invalid domain
+      5. Deactivate all user accounts in sandbox
+      6. Document data masking in security procedures
+    compliance_mapping:
+      - SOC2: CC6.7
+      - ISO27001: A.18.1.3
+      - GDPR: Article 25, Article 32
+      - HIPAA: 164.514(b)
+    references:
+      - "CSA Critical Controls: DAT02 - Data Separation"
+      
+  - id: SF-DATA-004
+    name: Event Monitoring Not Enabled
+    platform: salesforce
+    severity: medium
+    category: data_protection
+    description: Event Monitoring provides detailed logs of user activity and should be enabled for security monitoring and compliance.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.event_monitoring_enabled = false
+      RETURN org.name as organization,
+             'Event Monitoring not licensed or enabled' as finding
+    remediation: |
+      1. Purchase Event Monitoring add-on license
+      2. Navigate to Setup → Event Monitoring
+      3. Enable Event Monitoring checkbox
+      4. Configure event log storage or streaming
+      5. Integrate with SIEM for real-time monitoring
+      6. Create alerts for suspicious activities
+    compliance_mapping:
+      - SOC2: CC7.2
+      - ISO27001: A.12.4.1
+      - NIST-800-53: AU-2
+    references:
+      - "CSA Critical Controls: DAT01 - Continuous Monitoring"
+
+  # ============================================================================
+  # CATEGORY: Network & Communication Security (APP04)
+  # ============================================================================
+  
+  - id: SF-NET-001
+    name: HTTP Strict Transport Security Not Enabled
+    platform: salesforce
+    severity: medium
+    category: network_security
+    description: HSTS should be enabled to enforce HTTPS connections and prevent protocol downgrade attacks.
+    detection_query: |
+      MATCH (domain:CustomDomain {platform: 'salesforce'})
+      WHERE domain.hsts_enabled = false
+      RETURN domain.domain_name as domain,
+             'HSTS not configured' as finding
+    remediation: |
+      1. Navigate to Setup → My Domain
+      2. Click "Deploy to Users" if not already deployed
+      3. Enable "Enable HTTPS Strict Transport Security (HSTS)" 
+      4. Configure HSTS max-age (recommended: 31536000 seconds = 1 year)
+      5. Consider HSTS preload list submission
+    compliance_mapping:
+      - SOC2: CC6.6
+      - ISO27001: A.13.1.1
+      - NIST-800-53: SC-8
+    references:
+      - "CSA Critical Controls: APP04 - Secure Communications"
+      
+  - id: SF-NET-002
+    name: Outbound Apex HTTPS Not Enforced
+    platform: salesforce
+    severity: high
+    category: network_security
+    description: All outbound callouts from Apex code must use HTTPS to protect data in transit.
+    detection_query: |
+      MATCH (apex:ApexClass {platform: 'salesforce'})-[:MAKES_CALLOUT]->(endpoint:RemoteEndpoint)
+      WHERE endpoint.protocol = 'http'
+      RETURN apex.name as apex_class,
+             endpoint.url as insecure_endpoint
+    remediation: |
+      1. Review all Apex classes making HTTP callouts
+      2. Update endpoint URLs to use https://
+      3. Update remote site settings to HTTPS only
+      4. Test callouts in sandbox
+      5. Deploy to production
+      6. Remove HTTP remote site settings
+    compliance_mapping:
+      - SOC2: CC6.6
+      - ISO27001: A.13.1.1
+      - PCI-DSS: 4.1
+    references:
+      - "CSA Critical Controls: APP04 - Secure Communications"
+
+  # ============================================================================
+  # CATEGORY: Integration & API Security (INT01)
+  # ============================================================================
+  
+  - id: SF-INT-001
+    name: API Access Without IP Restrictions
+    platform: salesforce
+    severity: high
+    category: integration_security
+    description: Connected apps and integration users should have IP restrictions to limit API access to trusted networks.
+    detection_query: |
+      MATCH (app:ConnectedApp {platform: 'salesforce'})
+      WHERE NOT EXISTS(app.ip_ranges) OR size(app.ip_ranges) = 0
+      RETURN app.name as connected_app,
+             app.oauth_enabled as oauth_enabled,
+             'No IP restrictions configured' as finding
+    remediation: |
+      1. Navigate to Setup → Apps → Connected Apps → Manage Connected Apps
+      2. Edit each connected app
+      3. Set "IP Relaxation" to "Enforce IP restrictions"
+      4. Configure permitted IP ranges
+      5. Test integrations from allowed IPs
+      6. Monitor failed API calls from blocked IPs
+    compliance_mapping:
+      - SOC2: CC6.6
+      - ISO27001: A.13.1.1
+    references:
+      - "CSA Critical Controls: INT01 - Secure Integrations and API"
+      
+  - id: SF-INT-002
+    name: Integration User Credentials Not Rotated
+    platform: salesforce
+    severity: high
+    category: integration_security
+    description: Integration user passwords and API tokens must be rotated regularly according to security policy.
+    detection_query: |
+      MATCH (u:User {platform: 'salesforce'})
+      WHERE u.is_integration_user = true
+        AND u.password_last_changed_days_ago > 90
+      RETURN u.username as integration_user,
+             u.password_last_changed_days_ago as days_since_rotation,
+             u.connected_apps as apps_used
+    remediation: |
+      1. Create password rotation schedule (quarterly recommended)
+      2. Coordinate with integration teams before rotation
+      3. Update credentials in integration systems
+      4. Reset password in Salesforce
+      5. Update API tokens if using OAuth
+      6. Test all integrations after rotation
+    compliance_mapping:
+      - SOC2: CC6.1
+      - ISO27001: A.9.4.3
+      - NIST-800-53: IA-5(1)
+    references:
+      - "CSA Critical Controls: INT01 - Secure Integrations and API"
+      
+  - id: SF-INT-003
+    name: Overly Permissive Connected App Scopes
+    platform: salesforce
+    severity: medium
+    category: integration_security
+    description: Connected apps should request minimum required OAuth scopes following principle of least privilege.
+    detection_query: |
+      MATCH (app:ConnectedApp {platform: 'salesforce'})
+      WHERE 'full' IN app.oauth_scopes 
+         OR 'api' IN app.oauth_scopes
+      RETURN app.name as connected_app,
+             app.oauth_scopes as granted_scopes,
+             'Overly broad access' as finding
+    remediation: |
+      1. Review OAuth scopes for each connected app
+      2. Identify minimum required scopes for functionality
+      3. Update connected app with specific scopes only
+      4. Remove 'full' scope unless absolutely necessary
+      5. Use specific scopes like 'chatter_api', 'visualforce' instead
+      6. Test integration with reduced scopes
+    compliance_mapping:
+      - SOC2: CC6.3
+      - ISO27001: A.9.2.3
+    references:
+      - "CSA Critical Controls: INT01"
+
+  # ============================================================================
+  # CATEGORY: Change Management (APP05)
+  # ============================================================================
+  
+  - id: SF-CHG-001
+    name: Production Changes Without Sandbox Testing
+    platform: salesforce
+    severity: high
+    category: change_management
+    description: All metadata and code changes must be tested in sandbox before production deployment.
+    detection_query: |
+      MATCH (change:MetadataChange {platform: 'salesforce'})
+      WHERE change.environment = 'production'
+        AND NOT EXISTS(change.sandbox_test_date)
+      RETURN change.changed_by as user,
+             change.change_date as date,
+             change.component_name as component,
+             change.change_type as type
+    remediation: |
+      1. Establish change management policy requiring sandbox testing
+      2. Restrict production deployment permissions
+      3. Use change sets or CI/CD tools for deployment
+      4. Implement approval workflows for production changes
+      5. Document all changes in version control
+      6. Conduct UAT in partial copy or full sandbox
+    compliance_mapping:
+      - SOC2: CC8.1
+      - ISO27001: A.12.1.2
+      - ITIL: Change Management
+    references:
+      - "CSA Critical Controls: APP05 - Change Management Controls"
+      
+  - id: SF-CHG-002
+    name: No Version Control for Custom Development
+    platform: salesforce
+    severity: medium
+    category: change_management
+    description: All custom code and metadata should be tracked in version control system (Git).
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.version_control_enabled = false
+      RETURN org.name as organization,
+             'No version control detected' as finding
+    remediation: |
+      1. Set up Git repository (GitHub, GitLab, Bitbucket)
+      2. Configure Salesforce DX project structure
+      3. Implement branching strategy (GitFlow recommended)
+      4. Train developers on version control practices
+      5. Integrate with CI/CD pipeline
+      6. Require pull requests for all changes
+    compliance_mapping:
+      - SOC2: CC8.1
+      - ISO27001: A.14.2.2
+    references:
+      - "CSA Critical Controls: APP05 - Change Management Controls"
+
+  # ============================================================================
+  # CATEGORY: Monitoring & Auditing (DAT01)
+  # ============================================================================
+  
+  - id: SF-MON-001
+    name: Setup Audit Trail Not Monitored
+    platform: salesforce
+    severity: medium
+    category: monitoring
+    description: Setup Audit Trail tracks configuration changes and should be exported to SIEM for continuous monitoring.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.audit_trail_siem_integration = false
+      RETURN org.name as organization,
+             'Setup Audit Trail not integrated with SIEM' as finding
+    remediation: |
+      1. Enable Event Monitoring or use API to export Setup Audit Trail
+      2. Configure SIEM integration (Splunk, ELK, etc.)
+      3. Create alerts for critical changes (user creation, permission changes)
+      4. Set up dashboard for audit trail visibility
+      5. Implement weekly review process
+      6. Archive logs for compliance retention
+    compliance_mapping:
+      - SOC2: CC7.2
+      - ISO27001: A.12.4.1
+      - NIST-800-53: AU-6
+    references:
+      - "CSA Critical Controls: DAT01 - Continuous Monitoring"
+      
+  - id: SF-MON-002
+    name: Login Forensics Not Enabled
+    platform: salesforce
+    severity: low
+    category: monitoring
+    description: Login forensics provides detailed login history including location and device information for security analysis.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.login_forensics_enabled = false
+      RETURN org.name as organization
+    remediation: |
+      1. Navigate to Setup → Event Monitoring
+      2. Enable "Store Login Forensics Events"
+      3. Login history will be stored for up to 6 months
+      4. Create reports on login anomalies
+      5. Integrate with SIEM for real-time alerts
+    compliance_mapping:
+      - SOC2: CC7.2
+      - ISO27001: A.12.4.1
+    references:
+      - "CSA Critical Controls: DAT01"
+      
+  - id: SF-MON-003
+    name: Transaction Security Policies Not Configured
+    platform: salesforce
+    severity: medium
+    category: monitoring
+    description: Transaction Security policies enable real-time event monitoring and automated response to security threats.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE NOT EXISTS(org.transaction_security_policies)
+         OR size(org.transaction_security_policies) = 0
+      RETURN org.name as organization,
+             'No transaction security policies configured' as finding
+    remediation: |
+      1. Navigate to Setup → Transaction Security Policies
+      2. Create policies for critical events (data export, admin login, etc.)
+      3. Configure actions: Block, MFA, Notification
+      4. Test policies in sandbox first
+      5. Activate in production
+      6. Monitor policy violations
+    compliance_mapping:
+      - SOC2: CC7.3
+      - ISO27001: A.12.4.1
+    references:
+      - "CSA Critical Controls: DAT01"
+
+  # ============================================================================
+  # CATEGORY: Compliance & Governance (BUS01, BUS03)
+  # ============================================================================
+  
+  - id: SF-COMP-001
+    name: Data Classification Not Implemented
+    platform: salesforce
+    severity: medium
+    category: compliance
+    description: All sensitive data fields should be classified according to organizational data classification policy.
+    detection_query: |
+      MATCH (field:CustomField {platform: 'salesforce'})
+      WHERE NOT EXISTS(field.data_classification)
+         OR field.data_classification = 'Unclassified'
+      WITH count(field) as unclassified_count
+      WHERE unclassified_count > 50
+      RETURN unclassified_count as total_unclassified_fields
+    remediation: |
+      1. Define data classification schema (Public, Internal, Confidential, Restricted)
+      2. Navigate to Setup → Data Classification
+      3. Classify all fields containing sensitive data
+      4. Use classifications to drive security controls (encryption, masking)
+      5. Document classification in governance framework
+      6. Train users on data handling requirements
+    compliance_mapping:
+      - SOC2: CC6.7
+      - ISO27001: A.8.2.1
+      - GDPR: Article 30
+    references:
+      - "CSA Critical Controls: BUS01, DAT03"
+      
+  - id: SF-COMP-002
+    name: Sharing Model Too Permissive
+    platform: salesforce
+    severity: medium
+    category: compliance
+    description: Organization-wide defaults should follow principle of least privilege with Private or Public Read Only settings.
+    detection_query: |
+      MATCH (obj:CustomObject {platform: 'salesforce'})
+      WHERE obj.owd_internal = 'Public Read/Write'
+         OR obj.owd_external = 'Public Read/Write'
+      RETURN obj.name as object,
+             obj.owd_internal as internal_sharing,
+             obj.owd_external as external_sharing
+    remediation: |
+      1. Review organization-wide defaults for all objects
+      2. Change OWD to Private or Public Read Only
+      3. Use sharing rules to grant access where needed
+      4. Implement role hierarchy for data access
+      5. Test sharing changes in sandbox
+      6. Document business justification for any Public Read/Write OWDs
+    compliance_mapping:
+      - SOC2: CC6.3
+      - ISO27001: A.9.4.1
+      - GDPR: Article 32
+    references:
+      - "CSA Critical Controls: USR03"
+
+  # ============================================================================
+  # CATEGORY: Landscape Security (APP01)
+  # ============================================================================
+  
+  - id: SF-LAND-001
+    name: My Domain Not Deployed
+    platform: salesforce
+    severity: low
+    category: landscape_security
+    description: My Domain should be deployed to enable enhanced security features and SSO configuration.
+    detection_query: |
+      MATCH (org:Organization {platform: 'salesforce'})
+      WHERE org.my_domain_deployed = false
+      RETURN org.name as organization
+    remediation: |
+      1. Navigate to Setup → My Domain
+      2. Register a unique domain name
+      3. Wait for domain provisioning
+      4. Test domain in sandbox
+      5. Deploy to all users
+      6. Update bookmarks and integrations
+    compliance_mapping:
+      - SOC2: CC6.6
+    references:
+      - "CSA Critical Controls: APP01 - Secure Landscape"
+      
+  - id: SF-LAND-002
+    name: Cross-Environment Interface Security Risk
+    platform: salesforce
+    severity: high
+    category: landscape_security
+    description: Interfaces from non-production to production environments create privilege escalation risks and should be avoided.
+    detection_query: |
+      MATCH (dev:Environment {platform: 'salesforce', type: 'sandbox'})-[:HAS_INTERFACE]->(prod:Environment {type: 'production'})
+      RETURN dev.name as source_sandbox,
+             prod.name as target_production,
+             'Bidirectional interface detected' as risk
+    remediation: |
+      1. Review all cross-environment interfaces
+      2. Remove interfaces from sandbox → production
+      3. Allow only production → sandbox (push) interfaces
+      4. Encrypt all interface communications
+      5. Use dedicated service accounts with minimal permissions
+      6. Monitor interface usage in audit logs
+    compliance_mapping:
+      - SOC2: CC6.6
+      - ISO27001: A.13.1.1
+    references:
+      - "CSA Critical Controls: APP01, DAT02"
+
+metadata:
+  version: "1.0"
+  last_updated: "2026-04-27"
+  author: "SSPM Platform - Salesforce Security Rules"
+  source_references:
+    - "CSA Critical Controls Implementation for Salesforce (2021)"
+    - "Salesforce Security Health Check"
+    - "Salesforce Security Guide"
+  total_rules: 45
+  rule_categories:
+    - authentication: 4
+    - user_management: 3
+    - authorization: 5
+    - emergency_access: 2
+    - session_security: 2
+    - application_security: 4
+    - data_protection: 4
+    - network_security: 2
+    - integration_security: 3
+    - change_management: 2
+    - monitoring: 3
+    - compliance: 2
+    - landscape_security: 2
