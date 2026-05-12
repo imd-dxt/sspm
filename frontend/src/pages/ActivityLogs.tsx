@@ -246,7 +246,7 @@ function TimelineEntry({ entry, sev, color, bg, isLast }: Readonly<{
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, flex: 1, minWidth: 0 }}>
-            <PlatformLogo platform={entry.platform} size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+            <div style={{ flexShrink: 0, marginTop: 2 }}><PlatformLogo platform={entry.platform} size={16} /></div>
             <div style={{ minWidth: 0 }}>
               <p style={{ fontSize: '0.875rem', color: 'var(--text)', fontWeight: 500, lineHeight: 1.3 }}>
                 {entry.action}

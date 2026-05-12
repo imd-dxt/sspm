@@ -11,7 +11,7 @@ import {
   useIdentityGraph,
 } from '../api/identities'
 import type { IdentityUser, IdentityResourceRow } from '../api/types'
-import { platformLabel, formatRelative } from '../lib/utils'
+import { platformLabel } from '../lib/utils'
 
 // ── Mock data ──────────────────────────────────────────────────────────────────
 
