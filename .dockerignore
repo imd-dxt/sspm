@@ -1,0 +1,49 @@
+# Version control
+.git
+.github
+
+# Python artefacts
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.egg-info
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Test & tooling caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets — never bake into the image
+.env
+.env.*
+!.env.example
+
+# Local dev compose override
+docker/docker-compose.override.yml
+
+# Docker volume mounts (local only)
+docker/volumes/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs / non-runtime
+*.md

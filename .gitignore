@@ -37,6 +37,9 @@ htmlcov/
 # Neo4j / Docker volumes
 docker/volumes/
 
+# Local dev compose override (never commit to avoid overwriting production base)
+docker/docker-compose.override.yml
+
 # Alembic
 # (keep alembic.ini and versions/ tracked)
 

@@ -1,112 +1,105 @@
 version: "3.9"
 
+# Production base — no hardcoded secrets, no dev ports, no build context.
+# All ${VAR} references are substituted from /opt/sspm/.env at deploy time.
+# Local dev overrides live in docker-compose.override.yml (git-ignored).
+
 services:
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: sspm_postgres
+    restart: always
     environment:
-      POSTGRES_DB: sspm
-      POSTGRES_USER: sspm
-      POSTGRES_PASSWORD: sspm_pass
-    ports:
-      - "5432:5432"
+      POSTGRES_DB:       ${POSTGRES_DB:-sspm}
+      POSTGRES_USER:     ${POSTGRES_USER:-sspm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - sspm_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sspm -d sspm"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sspm} -d ${POSTGRES_DB:-sspm}"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── Neo4j Community Edition ─────────────────────────────────────────────────
+  # ── Neo4j Community Edition ──────────────────────────────────────────────────
   neo4j:
     image: neo4j:5-community
     container_name: sspm_neo4j
+    restart: always
     environment:
-      NEO4J_AUTH: neo4j/sspm_neo4j_pass
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
-    ports:
-      - "7474:7474"   # Neo4j Browser
-      - "7687:7687"   # Bolt protocol
+      NEO4J_AUTH:                                      ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS:                                   '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted:     "apoc.*"
+      NEO4J_dbms_memory_heap_max__size:                512m
     volumes:
       - neo4j_data:/data
       - neo4j_logs:/logs
+    networks:
+      - sspm_net
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:7474"]
-      interval: 15s
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 > /dev/null 2>&1"]
+      interval: 30s
       timeout: 10s
       retries: 5
+      start_period: 60s
 
-  # ── Redis ───────────────────────────────────────────────────────────────────
+  # ── Redis ────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: sspm_redis
-    ports:
-      - "6379:6379"
+    restart: always
+    command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    networks:
+      - sspm_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── Ollama (local LLM) ───────────────────────────────────────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    container_name: sspm_ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    # Pull llama3.2 on first start; subsequent starts skip if already downloaded
-    entrypoint: >
-      sh -c "
-        ollama serve &
-        sleep 5 &&
-        ollama pull llama3.2 &&
-        wait
-      "
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
-      start_period: 120s
-
   # ── SSPM API ─────────────────────────────────────────────────────────────────
   api:
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
+    image: ghcr.io/${GITHUB_REPOSITORY}:latest
     container_name: sspm_api
-    env_file: ../.env
-    ports:
-      - "8000:8000"
+    restart: always
     depends_on:
       postgres:
         condition: service_healthy
       neo4j:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
+        condition: service_started
+    environment:
+      # Construct internal URL so the container reaches the postgres service,
+      # not localhost. This overrides whatever POSTGRES_URL is in .env.
+      POSTGRES_URL:    postgresql://${POSTGRES_USER:-sspm}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sspm}
+      NEO4J_URI:       bolt://neo4j:7687
+      NEO4J_USER:      ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD:  ${NEO4J_PASSWORD}
+      REDIS_URL:       redis://redis:6379/0
+      ENCRYPTION_KEY:  ${ENCRYPTION_KEY}
+      LOG_LEVEL:       ${LOG_LEVEL:-INFO}
+      LOG_FORMAT:      ${LOG_FORMAT:-json}
+    ports:
+      - "8000:8000"
+    networks:
+      - sspm_net
     command: >
-      sh -c "
-        alembic upgrade head &&
-        uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-      "
-    volumes:
-      - ..:/app        # live-reload in dev
+      sh -c "alembic upgrade head &&
+             uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2"
 
 volumes:
   postgres_data:
   neo4j_data:
   neo4j_logs:
   redis_data:
-  ollama_data:
+
+networks:
+  sspm_net:
+    driver: bridge
