@@ -10,27 +10,8 @@ import {
   useFindingsByResource,
   useIdentityGraph,
 } from '../api/identities'
-import type { IdentityUser, IdentityResourceRow } from '../api/types'
+import type { IdentityResourceRow } from '../api/types'
 import { platformLabel } from '../lib/utils'
-
-// ── Mock data ──────────────────────────────────────────────────────────────────
-
-const MOCK_USERS: IdentityUser[] = [
-  { id: 1, platform_id: 'john.doe@acme.com',     username: 'john.doe@acme.com',     display_name: 'John Doe',     email: 'john.doe@acme.com',     is_active: true,  is_external: false, is_admin: true,  finding_count: 2, resource_count: 4, resources: [] },
-  { id: 2, platform_id: 'jane.smith@acme.com',   username: 'jane.smith@acme.com',   display_name: 'Jane Smith',   email: 'jane.smith@acme.com',   is_active: true,  is_external: false, is_admin: false, finding_count: 0, resource_count: 2, resources: [] },
-  { id: 3, platform_id: 'bob.wilson@acme.com',   username: 'bob.wilson@acme.com',   display_name: 'Bob Wilson',   email: 'bob.wilson@acme.com',   is_active: true,  is_external: false, is_admin: true,  finding_count: 3, resource_count: 6, resources: [] },
-  { id: 4, platform_id: 'contractor@external.io', username: 'contractor@external.io', display_name: 'Ext. Contractor', email: 'contractor@external.io', is_active: true,  is_external: true, is_admin: false, finding_count: 1, resource_count: 1, resources: [] },
-  { id: 5, platform_id: 'alice@acme.com',        username: 'alice@acme.com',        display_name: 'Alice Martin', email: 'alice@acme.com',        is_active: false, is_external: false, is_admin: false, finding_count: 0, resource_count: 0, resources: [] },
-]
-
-const MOCK_RESOURCES: IdentityResourceRow[] = [
-  { id: 1, platform_id: 'finance-team',    name: 'Finance Team',    resource_type: 'group',  finding_count: 0, critical: 0, high: 0, medium: 0, low: 0 },
-  { id: 2, platform_id: 'devops-team',     name: 'DevOps Team',     resource_type: 'group',  finding_count: 1, critical: 0, high: 1, medium: 0, low: 0 },
-  { id: 3, platform_id: 'security-team',   name: 'Security Team',   resource_type: 'group',  finding_count: 0, critical: 0, high: 0, medium: 0, low: 0 },
-  { id: 4, platform_id: 'global-admin',    name: 'Global Administrator', resource_type: 'role', finding_count: 2, critical: 2, high: 0, medium: 0, low: 0 },
-  { id: 5, platform_id: 'user-admin',      name: 'User Administrator',   resource_type: 'role', finding_count: 1, critical: 0, high: 1, medium: 0, low: 0 },
-  { id: 6, platform_id: 'security-reader', name: 'Security Reader',       resource_type: 'role', finding_count: 0, critical: 0, high: 0, medium: 0, low: 0 },
-]
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 
@@ -120,12 +101,12 @@ const USER_FILTER_BTNS: { id: UserFilter; label: string }[] = [
   { id: 'inactive', label: 'Inactive' },
 ]
 
-function UsersTab({ platform, isMock }: Readonly<{ platform: string; isMock: boolean }>) {
+function UsersTab({ platform }: Readonly<{ platform: string }>) {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<UserFilter>('all')
 
   const { data: rawUsers, isLoading } = useIdentityUsers(platform, undefined, 500)
-  const users = rawUsers && rawUsers.length > 0 ? rawUsers : (isMock ? MOCK_USERS : [])
+  const users = rawUsers ?? []
 
   const filtered = useMemo(() => {
     let list = users
@@ -231,11 +212,11 @@ function UserRow({ user }: Readonly<{ user: IdentityUser }>) {
 
 const GROUP_TYPES = new Set(['group', 'team', 'Group', 'Team', 'security_group', 'M365', 'Dynamic'])
 
-function GroupsTab({ platform, isMock }: Readonly<{ platform: string; isMock: boolean }>) {
+function GroupsTab({ platform }: Readonly<{ platform: string }>) {
   const [search, setSearch] = useState('')
   const { data: rawResources, isLoading } = useIdentityResources(platform, undefined, 500)
 
-  const resources = rawResources && rawResources.length > 0 ? rawResources : (isMock ? MOCK_RESOURCES : [])
+  const resources = rawResources ?? []
   const groups = useMemo(() => {
     const base = resources.filter((r) => GROUP_TYPES.has(r.resource_type ?? ''))
     if (!search.trim()) return base
@@ -259,11 +240,11 @@ function GroupsTab({ platform, isMock }: Readonly<{ platform: string; isMock: bo
 
 const ROLE_TYPES = new Set(['role', 'Role', 'directory_role', 'DirectoryRole'])
 
-function RolesTab({ platform, isMock }: Readonly<{ platform: string; isMock: boolean }>) {
+function RolesTab({ platform }: Readonly<{ platform: string }>) {
   const [search, setSearch] = useState('')
   const { data: rawResources, isLoading } = useIdentityResources(platform, undefined, 500)
 
-  const resources = rawResources && rawResources.length > 0 ? rawResources : (isMock ? MOCK_RESOURCES : [])
+  const resources = rawResources ?? []
   const roles = useMemo(() => {
     const base = resources.filter((r) => ROLE_TYPES.has(r.resource_type ?? ''))
     if (!search.trim()) return base
@@ -514,8 +495,6 @@ export default function IdentityDetail() {
   const { data: resourcesData } = useIdentityResources(platform, undefined, 500)
   const { data: findingsByResource } = useFindingsByResource(platform, undefined, 500)
 
-  const isMock = !usersData || usersData.length === 0
-
   const groupCount = useMemo(
     () => (resourcesData ?? []).filter((r) => GROUP_TYPES.has(r.resource_type ?? '')).length,
     [resourcesData],
@@ -526,16 +505,16 @@ export default function IdentityDetail() {
   )
 
   const tabCounts: Partial<Record<Tab, number>> = {
-    users:  usersData?.length ?? (isMock ? MOCK_USERS.length : undefined),
+    users:  usersData?.length,
     groups: groupCount || undefined,
     roles:  roleCount || undefined,
   }
 
   const kpi = summary ?? {
-    total_users: isMock ? MOCK_USERS.length : 0,
-    total_admins: isMock ? MOCK_USERS.filter((u) => u.is_admin).length : 0,
-    users_at_risk: isMock ? MOCK_USERS.filter((u) => u.finding_count > 0).length : 0,
-    total_resources: isMock ? MOCK_RESOURCES.length : (findingsByResource?.length ?? 0),
+    total_users: 0,
+    total_admins: 0,
+    users_at_risk: 0,
+    total_resources: findingsByResource?.length ?? 0,
   }
 
   return (
@@ -578,21 +557,14 @@ export default function IdentityDetail() {
         />
       )}
 
-      {/* Mock data notice */}
-      {isMock && (
-        <div style={{ padding: '8px 14px', background: 'color-mix(in oklch, var(--sev-medium) 8%, transparent)', border: '1px solid color-mix(in oklch, var(--sev-medium) 20%, transparent)', borderRadius: 8, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-          Demo data — sync this platform to see real identity data.
-        </div>
-      )}
-
       {/* Tabs */}
       <TabBar active={activeTab} onChange={setActiveTab} counts={tabCounts} />
 
       {/* Tab content */}
-      {activeTab === 'users'  && <UsersTab  platform={platform} isMock={isMock} />}
-      {activeTab === 'groups' && <GroupsTab platform={platform} isMock={isMock} />}
-      {activeTab === 'roles'  && <RolesTab  platform={platform} isMock={isMock} />}
-      {activeTab === 'map'    && <AccessMapTab platform={platform} users={usersData ?? (isMock ? MOCK_USERS : [])} />}
+      {activeTab === 'users'  && <UsersTab  platform={platform} />}
+      {activeTab === 'groups' && <GroupsTab platform={platform} />}
+      {activeTab === 'roles'  && <RolesTab  platform={platform} />}
+      {activeTab === 'map'    && <AccessMapTab platform={platform} users={usersData ?? []} />}
     </div>
   )
 }
