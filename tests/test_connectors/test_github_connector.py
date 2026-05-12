@@ -86,7 +86,10 @@ class TestGitHubConnectorNormalize:
         result = self.connector.normalize_data(raw, "permission")
         assert result["entity_type"] == "permission"
         assert result["role"] == "write"
-        assert result["grantee_id"] == "alice"
+        # grantee_id stores the numeric GitHub user ID so it joins against
+        # user.platform_id (also a numeric string); login is kept separately.
+        assert result["grantee_id"] == "1"
+        assert result["grantee_login"] == "alice"
 
     def test_normalize_unknown_type_raises(self):
         with pytest.raises(Exception):
@@ -134,11 +137,11 @@ class TestGitHubConnectorFetch:
         self.connector._http = MagicMock()
 
     def test_fetch_users(self):
+        # _paginate stops after the first page when len(data) < 100 — no extra call.
         self.connector._http.get.side_effect = [
-            [MOCK_MEMBER],                          # paginate members page 1
-            [],                                     # paginate members page 2 (stop)
-            MOCK_USER,                              # /users/alice profile
-            MOCK_MEMBERSHIP,                        # /orgs/.../memberships/alice
+            [MOCK_MEMBER],   # paginate members (1 item < 100 → stops, no page-2 call)
+            MOCK_USER,       # /users/alice profile
+            MOCK_MEMBERSHIP, # /orgs/.../memberships/alice
         ]
         users = self.connector.fetch_users()
         assert len(users) == 1
@@ -156,14 +159,15 @@ class TestGitHubConnectorFetch:
         assert groups[0]["name"] == "Backend"
 
     def test_fetch_resources_with_protection(self):
-        import requests
-        # repos pagination then branch protection
+        # _paginate stops after page 1 (1 item < 100).
+        # _repo_security_features makes several extra HTTP calls; patch it out
+        # so this test stays focused on the branch-protection path.
         self.connector._http.get.side_effect = [
-            [MOCK_REPO],         # repos page 1
-            [],                  # repos stop
-            MOCK_PROTECTION,     # branch protection for api-service/main
+            [MOCK_REPO],     # repos page 1 (stops, no page-2 call)
+            MOCK_PROTECTION, # branch protection for api-service/main
         ]
-        resources = self.connector.fetch_resources()
+        with patch.object(self.connector, '_repo_security_features', return_value={}):
+            resources = self.connector.fetch_resources()
         assert len(resources) == 1
         assert resources[0]["name"] == "api-service"
         assert resources[0]["metadata"]["branch_protected"] is True
@@ -175,10 +179,10 @@ class TestGitHubConnectorFetch:
         http_404 = requests.HTTPError(response=mock_resp)
 
         self.connector._http.get.side_effect = [
-            [MOCK_REPO],   # repos
-            [],
-            http_404,      # no branch protection rule
+            [MOCK_REPO], # repos page 1 (stops, no page-2 call)
+            http_404,    # branch protection → 404 → unprotected defaults
         ]
-        resources = self.connector.fetch_resources()
+        with patch.object(self.connector, '_repo_security_features', return_value={}):
+            resources = self.connector.fetch_resources()
         assert resources[0]["metadata"]["branch_protected"] is False
         assert resources[0]["metadata"]["allow_force_pushes"] is True
