@@ -94,11 +94,11 @@ function RuleRow({ rule }: Readonly<{ rule: Rule }>) {
               </div>
             </div>
           )}
-          {rule.compliance_mapping.length > 0 && (
+          {(rule.compliance_mapping ?? []).length > 0 && (
             <div>
               <p className="label">Compliance</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {rule.compliance_mapping.map((c) => (
+                {(rule.compliance_mapping ?? []).map((c) => (
                   <span key={c} style={{
                     borderRadius: 6, background: 'var(--surface)', border: '1px solid var(--border)',
                     padding: '2px 8px', fontSize: '0.6875rem', fontFamily: 'monospace', color: 'var(--text-muted)',

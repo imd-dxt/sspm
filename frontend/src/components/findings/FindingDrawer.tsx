@@ -12,11 +12,9 @@ import type { Finding } from '../../api/types'
 import { useUpdateFindingStatus } from '../../api/findings'
 import SeverityBadge from './SeverityBadge'
 import {
-  cn,
   formatRelative,
   formatAbsolute,
   platformLabel,
-  statusBg,
   statusLabel,
 } from '../../lib/utils'
 
@@ -33,6 +31,13 @@ const STATUS_OPTIONS = [
 ] as const
 
 type FindingStatus = 'open' | 'resolved' | 'false_positive' | 'accepted_risk'
+
+const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
+  open:           { bg: 'color-mix(in oklch, var(--sev-high) 15%, transparent)',     color: 'var(--sev-high)' },
+  resolved:       { bg: 'color-mix(in oklch, var(--sev-ok) 15%, transparent)',       color: 'var(--sev-ok)' },
+  false_positive: { bg: 'color-mix(in oklch, var(--text-muted) 15%, transparent)',   color: 'var(--text-muted)' },
+  accepted_risk:  { bg: 'color-mix(in oklch, var(--sev-medium) 15%, transparent)',   color: 'var(--sev-medium)' },
+}
 
 export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
   const [showStatusModal, setShowStatusModal] = useState(false)
@@ -55,7 +60,6 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
 
   useEffect(() => {
     if (finding) {
-      // Prevent body scroll when drawer is open
       document.body.style.overflow = 'hidden'
     } else {
       document.body.style.overflow = ''
@@ -85,106 +89,113 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
     setShowStatusModal(false)
   }
 
+  const statusColor = STATUS_COLORS[finding.status] ?? STATUS_COLORS.open
+  const complianceItems = finding.compliance_mapping ?? []
+
   return (
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 z-30"
-        style={{ background: 'var(--drawer-overlay-bg)' }}
+        className="drawer-overlay"
         onClick={onClose}
         aria-hidden="true"
       />
 
       {/* Drawer */}
-      <div
-        ref={drawerRef}
-        className="fixed inset-y-0 right-0 z-40 flex w-full max-w-xl flex-col"
-        style={{
-          background: 'var(--drawer-bg)',
-          borderLeft: '2px solid #0ea5e9',
-          boxShadow: '-12px 0 40px rgba(14,165,233,0.12), -4px 0 16px rgba(0,0,0,0.18)',
-        }}
-      >
+      <div ref={drawerRef} className="drawer">
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-border p-5">
-          <div className="flex-1 min-w-0 pr-4">
-            <div className="flex items-center gap-2 flex-wrap mb-1">
+        <div className="drawer-header">
+          <div style={{ flex: 1, minWidth: 0, paddingRight: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
               <SeverityBadge severity={finding.severity} />
-              <span
-                className={cn(
-                  'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium',
-                  statusBg(finding.status),
-                )}
-              >
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                borderRadius: 6,
+                padding: '2px 8px',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                background: statusColor.bg,
+                color: statusColor.color,
+              }}>
                 {statusLabel(finding.status)}
               </span>
-              <span className="text-xs font-mono text-muted bg-surface-2 px-1.5 py-0.5 rounded">
+              <span style={{
+                fontSize: '0.6875rem',
+                fontFamily: 'monospace',
+                color: 'var(--text-muted)',
+                background: 'var(--surface-2)',
+                padding: '2px 6px',
+                borderRadius: 4,
+              }}>
                 {finding.platform}
               </span>
             </div>
-            <h2 className="text-base font-semibold text-text leading-snug">
+            <h2 style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'var(--text)', lineHeight: 1.35 }}>
               {finding.rule_name ?? finding.rule_id}
             </h2>
-            <p className="mt-0.5 text-xs font-mono text-muted truncate">{finding.resource_identifier}</p>
+            <p style={{ marginTop: 2, fontSize: '0.6875rem', fontFamily: 'monospace', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {finding.resource_identifier}
+            </p>
           </div>
-          <button onClick={onClose} className="btn-ghost -mr-1 -mt-1 p-2" aria-label="Close">
+          <button onClick={onClose} className="btn-ghost" style={{ marginRight: -4, marginTop: -4, padding: 8 }} aria-label="Close">
             <X size={16} />
           </button>
         </div>
 
         {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        <div className="drawer-body" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* Description */}
           <section>
             <p className="label">Description</p>
-            <p className="text-sm text-text">{finding.description}</p>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text)' }}>{finding.description}</p>
           </section>
 
           {/* Metadata grid */}
-          <section className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+          <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 16, rowGap: 12, fontSize: '0.875rem' }}>
             <div>
               <p className="label">Category</p>
-              <p className="text-text capitalize">{finding.category}</p>
+              <p style={{ color: 'var(--text)', textTransform: 'capitalize' }}>{finding.category}</p>
             </div>
             <div>
               <p className="label">Platform</p>
-              <p className="text-text">{platformLabel(finding.platform)}</p>
+              <p style={{ color: 'var(--text)' }}>{platformLabel(finding.platform)}</p>
             </div>
             {finding.resource_type && (
               <div>
                 <p className="label">Resource type</p>
-                <p className="text-text">{finding.resource_type}</p>
+                <p style={{ color: 'var(--text)' }}>{finding.resource_type}</p>
               </div>
             )}
-            <div className="col-span-2">
+            <div style={{ gridColumn: '1 / -1' }}>
               <p className="label">Resource</p>
-              <p className="font-mono text-xs text-text bg-surface-2 px-2 py-1 rounded break-all">
+              <p style={{ fontFamily: 'monospace', fontSize: '0.75rem', color: 'var(--text)', background: 'var(--surface-2)', padding: '4px 8px', borderRadius: 6, wordBreak: 'break-all' }}>
                 {finding.resource_identifier}
               </p>
             </div>
             <div>
               <p className="label">First detected</p>
-              <p className="text-text tabular-nums">{formatAbsolute(finding.first_detected)}</p>
+              <p style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{formatAbsolute(finding.first_detected)}</p>
             </div>
             <div>
               <p className="label">Last detected</p>
-              <p className="text-text tabular-nums">{formatRelative(finding.last_detected)}</p>
+              <p style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{formatRelative(finding.last_detected)}</p>
             </div>
             {finding.connector_name && (
               <div>
                 <p className="label">Connector</p>
-                <p className="text-text">{finding.connector_name}</p>
+                <p style={{ color: 'var(--text)' }}>{finding.connector_name}</p>
               </div>
             )}
             {finding.resolved_at && (
               <div>
                 <p className="label">Resolved at</p>
-                <p className="text-text tabular-nums">{formatAbsolute(finding.resolved_at)}</p>
+                <p style={{ color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{formatAbsolute(finding.resolved_at)}</p>
               </div>
             )}
           </section>
 
-          {/* Impact explanation (Ollama posture analysis) */}
+          {/* Impact explanation */}
           {finding.impact_explanation && (
             <section style={{
               background: 'color-mix(in oklch, var(--sev-high) 8%, transparent)',
@@ -203,11 +214,11 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
                   )}
                 </p>
               </div>
-              <p className="text-sm text-text">{finding.impact_explanation}</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text)' }}>{finding.impact_explanation}</p>
             </section>
           )}
 
-          {/* Remediation — prefer AI-generated, fall back to static */}
+          {/* Remediation */}
           {(finding.generated_remediation || finding.remediation) && (
             <section>
               <p className="label">
@@ -218,15 +229,15 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
                   </span>
                 )}
               </p>
-              <p className="text-sm text-text" style={{ whiteSpace: 'pre-line' }}>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text)', whiteSpace: 'pre-line' }}>
                 {finding.generated_remediation || finding.remediation}
               </p>
               {finding.generated_remediation && finding.remediation && finding.remediation !== finding.generated_remediation && (
                 <details style={{ marginTop: 8 }}>
-                  <summary className="text-xs text-muted cursor-pointer" style={{ userSelect: 'none' }}>
+                  <summary style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
                     Show static remediation
                   </summary>
-                  <p className="text-sm text-muted mt-2" style={{ whiteSpace: 'pre-line' }}>{finding.remediation}</p>
+                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: 8, whiteSpace: 'pre-line' }}>{finding.remediation}</p>
                 </details>
               )}
             </section>
@@ -236,19 +247,19 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
           {finding.justification && (
             <section>
               <p className="label">Justification</p>
-              <p className="text-sm text-muted italic">"{finding.justification}"</p>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>"{finding.justification}"</p>
             </section>
           )}
 
           {/* Compliance */}
-          {finding.compliance_mapping.length > 0 && (
+          {complianceItems.length > 0 && (
             <section>
               <p className="label">Compliance mapping</p>
-              <div className="flex flex-wrap gap-1.5">
-                {finding.compliance_mapping.map((c) => (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {complianceItems.map((c) => (
                   <span
                     key={c}
-                    className="rounded bg-surface-2 px-2 py-0.5 text-xs font-mono text-muted"
+                    style={{ borderRadius: 6, background: 'var(--surface-2)', padding: '2px 8px', fontSize: '0.6875rem', fontFamily: 'monospace', color: 'var(--text-muted)' }}
                   >
                     {c}
                   </span>
@@ -261,7 +272,7 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
           {finding.evidence && Object.keys(finding.evidence).length > 0 && (
             <section>
               <p className="label">Evidence</p>
-              <pre className="overflow-x-auto rounded-lg bg-surface-2 p-3 text-xs font-mono text-muted whitespace-pre-wrap break-words">
+              <pre className="code-block">
                 {JSON.stringify(finding.evidence, null, 2)}
               </pre>
             </section>
@@ -269,23 +280,24 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
         </div>
 
         {/* Footer: status controls */}
-        <div className="border-t border-border p-4">
-          <p className="label mb-2">Change status</p>
-          <div className="flex flex-wrap gap-2">
+        <div style={{ borderTop: '1px solid var(--border)', padding: '16px 20px', flexShrink: 0 }}>
+          <p className="label" style={{ marginBottom: 8 }}>Change status</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {STATUS_OPTIONS.filter((opt) => opt.value !== finding.status).map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => openStatusModal(opt.value)}
-                className="btn-ghost border border-border"
+                className="btn-ghost"
+                style={{ border: '1px solid var(--border)' }}
               >
                 {opt.icon}
                 {opt.label}
-                <ChevronDown size={12} className="ml-auto opacity-50" />
+                <ChevronDown size={12} style={{ marginLeft: 'auto', opacity: 0.5 }} />
               </button>
             ))}
           </div>
           {updateStatus.isError && (
-            <p className="mt-2 text-xs text-sev-critical">
+            <p style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--sev-critical)' }}>
               Failed to update:{' '}
               {updateStatus.error instanceof Error
                 ? updateStatus.error.message
@@ -299,19 +311,28 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
       {showStatusModal && (
         <>
           <div
-            className="fixed inset-0 z-50"
-            style={{ background: 'rgba(0,0,0,0.45)' }}
+            style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(0,0,0,0.45)' }}
             onClick={() => setShowStatusModal(false)}
             aria-hidden="true"
           />
-          <div
-            className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border p-6 shadow-2xl"
-            style={{ background: 'var(--surface)' }}
-          >
-            <h3 className="text-base font-semibold text-text mb-1">Change status</h3>
-            <p className="text-sm text-muted mb-4">
+          <div style={{
+            position: 'fixed',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 61,
+            width: '100%',
+            maxWidth: 440,
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            borderRadius: 16,
+            padding: 24,
+            boxShadow: '0 24px 64px rgba(0,0,0,0.22)',
+          }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>Change status</h3>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: 16 }}>
               Mark this finding as{' '}
-              <strong className="text-text">{statusLabel(newStatus)}</strong>
+              <strong style={{ color: 'var(--text)' }}>{statusLabel(newStatus)}</strong>
             </p>
 
             <label className="label" htmlFor="justification-input">
@@ -324,7 +345,8 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
             </label>
             <textarea
               id="justification-input"
-              className="input min-h-[80px] resize-y"
+              className="input"
+              style={{ minHeight: 80, resize: 'vertical' }}
               placeholder={
                 ['false_positive', 'accepted_risk'].includes(newStatus)
                   ? 'Required — explain why this status is appropriate…'
@@ -339,7 +361,7 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
               </p>
             )}
 
-            <div className="mt-4 flex justify-end gap-2">
+            <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button onClick={() => setShowStatusModal(false)} className="btn-ghost">
                 Cancel
               </button>
@@ -351,7 +373,7 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
                 }
                 className="btn-primary"
               >
-                {updateStatus.isPending && <Loader2 size={14} className="animate-spin" />}
+                {updateStatus.isPending && <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} />}
                 Confirm
               </button>
             </div>
