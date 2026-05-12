@@ -62,7 +62,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    ollama:
+
+  # ── Ollama (local LLM) ───────────────────────────────────────────────────────
+  ollama:
     image: ollama/ollama:latest
     container_name: sspm_ollama
     restart: always
