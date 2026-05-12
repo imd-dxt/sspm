@@ -178,20 +178,17 @@ def _user_finding_count(
 @router.get("/platforms")
 def list_identity_platforms(db: DB) -> list[dict[str, Any]]:
     """Platforms that have synced entity data, joined with connector info."""
-    user_counts: dict[str, int] = dict(
-        db.query(NormalizedEntity.platform, func.count(NormalizedEntity.id))
-        .filter(NormalizedEntity.entity_type == "user")
-        .group_by(NormalizedEntity.platform)
-        .all()
-    )
-    resource_counts: dict[str, int] = dict(
-        db.query(NormalizedEntity.platform, func.count(NormalizedEntity.id))
-        .filter(NormalizedEntity.entity_type == "resource")
-        .group_by(NormalizedEntity.platform)
-        .all()
-    )
+    # Count by type — any entity type signals a synced platform
+    counts_by_type: dict[tuple[str, str], int] = {
+        (platform, etype): cnt
+        for platform, etype, cnt in (
+            db.query(NormalizedEntity.platform, NormalizedEntity.entity_type, func.count(NormalizedEntity.id))
+            .group_by(NormalizedEntity.platform, NormalizedEntity.entity_type)
+            .all()
+        )
+    }
 
-    platforms_with_data = set(user_counts) | set(resource_counts)
+    platforms_with_data: set[str] = {p for p, _ in counts_by_type}
     if not platforms_with_data:
         return []
 
@@ -208,8 +205,8 @@ def list_identity_platforms(db: DB) -> list[dict[str, Any]]:
             "connector_name": c.display_name,
             "connection_ok": c.connection_ok,
             "last_sync_at": c.last_sync_at.isoformat() if c.last_sync_at else None,
-            "user_count": user_counts.get(c.platform_name, 0),
-            "resource_count": resource_counts.get(c.platform_name, 0),
+            "user_count": counts_by_type.get((c.platform_name, "user"), 0),
+            "resource_count": counts_by_type.get((c.platform_name, "resource"), 0),
         }
         for c in connectors
         if c.platform_name in platforms_with_data
