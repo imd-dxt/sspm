@@ -198,14 +198,27 @@ class EntraIDConnector(BaseConnector):
     # ── Fetch methods ─────────────────────────────────────────────────────────
 
     def fetch_users(self) -> list[dict[str, Any]]:
-        """GET /users — basic profile + sign-in activity."""
+        """GET /users — basic profile. signInActivity requires AuditLog.Read.All
+        so we attempt it first and fall back to the base select on 403."""
         self._ensure_auth()
-        select = (
+        select_full = (
             "id,displayName,userPrincipalName,mail,accountEnabled,"
             "userType,createdDateTime,onPremisesSyncEnabled,department,jobTitle,"
             "lastPasswordChangeDateTime,passwordPolicies,signInActivity"
         )
-        return self._safe_paginate("/users", {"$top": "999", _SEL: select})
+        select_base = (
+            "id,displayName,userPrincipalName,mail,accountEnabled,"
+            "userType,createdDateTime,onPremisesSyncEnabled,department,jobTitle,"
+            "lastPasswordChangeDateTime,passwordPolicies"
+        )
+        try:
+            return self._paginate("/users", {"$top": "999", _SEL: select_full})
+        except Exception as exc:
+            import requests as _req
+            if isinstance(exc, _req.HTTPError) and exc.response is not None and exc.response.status_code == 403:
+                self._log.warning("signInActivity_unavailable_falling_back")
+                return self._paginate("/users", {"$top": "999", _SEL: select_base})
+            raise
 
     def fetch_mfa_status(self) -> list[dict[str, Any]]:
         """
