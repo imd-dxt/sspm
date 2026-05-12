@@ -83,6 +83,18 @@ services:
         limits:
           memory: 3g   # hard cap so it doesn't starve postgres/neo4j
 
+  # ── Frontend (React + nginx) ─────────────────────────────────────────────────
+  frontend:
+    image: ghcr.io/${GITHUB_REPOSITORY}-frontend:latest
+    container_name: sspm_frontend
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+    networks:
+      - sspm_net
+
   # ── SSPM API ─────────────────────────────────────────────────────────────────
   api:
     image: ghcr.io/${GITHUB_REPOSITORY}:latest

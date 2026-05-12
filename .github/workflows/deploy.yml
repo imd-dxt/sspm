@@ -68,16 +68,29 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest
 
-      - name: Build and push
+      - name: Build and push backend
         uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/Dockerfile
           push: true
-          tags:      ${{ steps.meta.outputs.tags }}
-          labels:    ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
+          tags:       ${{ steps.meta.outputs.tags }}
+          labels:     ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=backend
+          cache-to:   type=gha,mode=max,scope=backend
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-frontend:sha-${{ github.sha }}
+          labels:     ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=frontend
+          cache-to:   type=gha,mode=max,scope=frontend
 
   # ── Job 3: Deploy to DigitalOcean Droplet ────────────────────────────────────
   deploy:
@@ -109,14 +122,15 @@ jobs:
             # Authenticate with GHCR
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
 
-            # Pull the newly built image
+            # Pull the newly built images
             docker pull ghcr.io/$GITHUB_REPOSITORY:latest
+            docker pull ghcr.io/$GITHUB_REPOSITORY-frontend:latest
 
-            # Ensure infra is running, then start/recreate only the api container.
+            # Ensure infra is running, then start/recreate api + frontend.
             # depends_on (postgres healthy) is respected — no --no-deps.
             # Migrations run inside the container CMD (alembic upgrade head &&
             # uvicorn ...) after depends_on conditions are satisfied.
-            docker compose --project-directory . -f docker/docker-compose.yml up -d api
+            docker compose --project-directory . -f docker/docker-compose.yml up -d api frontend
 
             # Remove dangling images to reclaim disk space
             docker image prune -f
