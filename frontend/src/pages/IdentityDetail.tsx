@@ -10,7 +10,7 @@ import {
   useFindingsByResource,
   useIdentityGraph,
 } from '../api/identities'
-import type { IdentityResourceRow } from '../api/types'
+import type { IdentityUser, IdentityResourceRow } from '../api/types'
 import { platformLabel } from '../lib/utils'
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
