@@ -47,3 +47,7 @@ Thumbs.db
 
 # Docs / non-runtime
 *.md
+
+# Frontend build artefacts — never ship host node_modules or old dist into image
+**/node_modules
+frontend/dist

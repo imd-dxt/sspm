@@ -106,7 +106,7 @@ services:
       neo4j:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       # Construct internal URL so the container reaches the postgres service,
       # not localhost. This overrides whatever POSTGRES_URL is in .env.
