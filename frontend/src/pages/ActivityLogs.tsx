@@ -53,14 +53,14 @@ export default function ActivityLogs() {
     limit,
   )
 
-  const isMock = !rawLogs || rawLogs.length === 0
+  const isMock = !rawLogs && !isLoading
   let baseLogs: ActivityLogEntry[]
   if (isLoading) {
     baseLogs = []
   } else if (isMock) {
     baseLogs = MOCK_LOGS
   } else {
-    baseLogs = rawLogs
+    baseLogs = rawLogs ?? []
   }
 
   const filtered = useMemo(() => {

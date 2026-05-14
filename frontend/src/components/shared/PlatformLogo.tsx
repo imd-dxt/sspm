@@ -106,7 +106,11 @@ export default function PlatformLogo({ platform, size = 34 }: Readonly<Props>) {
   if (platform === 'entraid') {
     return (
       <span style={baseStyle}>
-        <EntraIDMark />
+        <img
+          src="/logos/hps.png"
+          alt="Microsoft Entra ID"
+          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+        />
       </span>
     )
   }

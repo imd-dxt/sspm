@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Users, Grid3x3, Shield, Map, Search, Filter, ShieldCheck } from 'lucide-react'
+import { ArrowLeft, Users, Grid3x3, Shield, Map, Search, Filter, ShieldCheck, FolderOpen } from 'lucide-react'
 import PlatformLogo from '../components/shared/PlatformLogo'
 import ForceGraph from '../components/identities/ForceGraph'
 import {
@@ -15,9 +15,17 @@ import { platformLabel } from '../lib/utils'
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
 
-type Tab = 'users' | 'groups' | 'roles' | 'map'
+type Tab = 'users' | 'groups' | 'roles' | 'repos' | 'map'
 
-const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+interface TabDef { id: Tab; label: string; icon: React.ReactNode }
+
+const GITHUB_TABS: TabDef[] = [
+  { id: 'users', label: 'Users',        icon: <Users size={14} /> },
+  { id: 'repos', label: 'Repositories', icon: <FolderOpen size={14} /> },
+  { id: 'map',   label: 'Access Map',   icon: <Map size={14} /> },
+]
+
+const DEFAULT_TABS: TabDef[] = [
   { id: 'users',  label: 'Users',               icon: <Users size={14} /> },
   { id: 'groups', label: 'Groups / Teams',       icon: <Grid3x3 size={14} /> },
   { id: 'roles',  label: 'Roles & Permissions',  icon: <Shield size={14} /> },
@@ -25,15 +33,15 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
 ]
 
 function TabBar({
-  active, onChange, counts,
-}: Readonly<{ active: Tab; onChange: (t: Tab) => void; counts: Partial<Record<Tab, number>> }>) {
+  active, onChange, counts, tabs,
+}: Readonly<{ active: Tab; onChange: (t: Tab) => void; counts: Partial<Record<Tab, number>>; tabs: TabDef[] }>) {
   return (
     <div style={{
       display: 'flex', gap: 2,
       background: 'var(--surface-2)', border: '1px solid var(--border)',
       borderRadius: 10, padding: 4, flexWrap: 'wrap',
     }}>
-      {TABS.map((t) => (
+      {tabs.map((t) => (
         <button
           key={t.id}
           onClick={() => onChange(t.id)}
@@ -257,6 +265,33 @@ function RolesTab({ platform }: Readonly<{ platform: string }>) {
       label="Roles & Permissions"
       emptyMsg="No roles found for this platform."
       rows={roles}
+      isLoading={isLoading}
+      search={search}
+      onSearch={setSearch}
+    />
+  )
+}
+
+// ── Repositories tab (GitHub) ─────────────────────────────────────────────────
+
+function RepositoriesTab({ platform }: Readonly<{ platform: string }>) {
+  const [search, setSearch] = useState('')
+  const { data: rawResources, isLoading } = useIdentityResources(platform, undefined, 500)
+
+  const repos = useMemo(() => {
+    const base = (rawResources ?? []).filter(
+      (r) => r.resource_type === 'repository' || r.resource_type === 'repo',
+    )
+    if (!search.trim()) return base
+    const q = search.toLowerCase()
+    return base.filter((r) => r.name.toLowerCase().includes(q))
+  }, [rawResources, search])
+
+  return (
+    <ResourceList
+      label="Repositories"
+      emptyMsg="No repositories found for this platform."
+      rows={repos}
       isLoading={isLoading}
       search={search}
       onSearch={setSearch}
@@ -490,6 +525,16 @@ export default function IdentityDetail() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Tab>('users')
 
+  const platformTabs = platform === 'github' ? GITHUB_TABS : DEFAULT_TABS
+
+  // Reset to first valid tab when platform changes
+  const prevPlatformRef = useRef(platform)
+  if (prevPlatformRef.current !== platform) {
+    prevPlatformRef.current = platform
+    const valid = new Set(platformTabs.map((t) => t.id))
+    if (!valid.has(activeTab)) setActiveTab('users')
+  }
+
   const { data: summary, isLoading: summaryLoading } = useIdentitySummary(platform)
   const { data: usersData } = useIdentityUsers(platform, undefined, 500)
   const { data: resourcesData } = useIdentityResources(platform, undefined, 500)
@@ -503,12 +548,14 @@ export default function IdentityDetail() {
     () => (resourcesData ?? []).filter((r) => ROLE_TYPES.has(r.resource_type ?? '')).length,
     [resourcesData],
   )
+  const repoCount = useMemo(
+    () => (resourcesData ?? []).filter((r) => r.resource_type === 'repository' || r.resource_type === 'repo').length,
+    [resourcesData],
+  )
 
-  const tabCounts: Partial<Record<Tab, number>> = {
-    users:  usersData?.length,
-    groups: groupCount || undefined,
-    roles:  roleCount || undefined,
-  }
+  const tabCounts: Partial<Record<Tab, number>> = platform === 'github'
+    ? { users: usersData?.length, repos: repoCount || undefined }
+    : { users: usersData?.length, groups: groupCount || undefined, roles: roleCount || undefined }
 
   const kpi = summary ?? {
     total_users: 0,
@@ -558,12 +605,13 @@ export default function IdentityDetail() {
       )}
 
       {/* Tabs */}
-      <TabBar active={activeTab} onChange={setActiveTab} counts={tabCounts} />
+      <TabBar active={activeTab} onChange={setActiveTab} counts={tabCounts} tabs={platformTabs} />
 
       {/* Tab content */}
       {activeTab === 'users'  && <UsersTab  platform={platform} />}
       {activeTab === 'groups' && <GroupsTab platform={platform} />}
       {activeTab === 'roles'  && <RolesTab  platform={platform} />}
+      {activeTab === 'repos'  && <RepositoriesTab platform={platform} />}
       {activeTab === 'map'    && <AccessMapTab platform={platform} users={usersData ?? []} />}
     </div>
   )

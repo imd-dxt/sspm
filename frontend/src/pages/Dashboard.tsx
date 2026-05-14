@@ -4,11 +4,11 @@ import {
   RadialBarChart, RadialBar, PolarRadiusAxis, Label,
   AreaChart, Area, XAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import type { ScanRun } from '../api/types'
+import type { ScanRun, IdentityPlatform } from '../api/types'
 import { useFindingSummary, useCrossPlatformFindings } from '../api/findings'
 import { useConnectors } from '../api/connectors'
 import { useScanRuns } from '../api/rules'
-import { useIdentityPlatforms, useIdentitySummary } from '../api/identities'
+import { useIdentityPlatforms } from '../api/identities'
 import { usePostureScore, usePrioritizedActions } from '../api/activityLogs'
 import SeverityBadge from '../components/findings/SeverityBadge'
 import PlatformLogo from '../components/shared/PlatformLogo'
@@ -155,35 +155,49 @@ function SeverityBar({ critical, high, medium, low }: Readonly<SevCounts>) {
 }
 
 // ── Identities overview KPI ─────────────────────────────────────────────────
+function PlatformTile({ p }: Readonly<{ p: IdentityPlatform }>) {
+  const { data: posture } = usePostureScore(p.platform)
+  const alerts = posture?.total_open_findings ?? 0
+  return (
+    <Link
+      to={`/identities/${p.platform}`}
+      style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
+        padding: '10px 6px', borderRadius: 10, border: '1px solid var(--border)',
+        background: 'var(--surface-2)', textDecoration: 'none', transition: 'background 0.12s',
+      }}
+    >
+      <PlatformLogo platform={p.platform} size={30} />
+      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--text)', textAlign: 'center', lineHeight: 1.2, margin: 0 }}>
+        {platformLabel(p.platform)}
+      </p>
+      {alerts > 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <AlertTriangle size={10} style={{ color: 'var(--sev-medium)' }} />
+          <span style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--sev-medium)', fontVariantNumeric: 'tabular-nums' }}>{alerts}</span>
+        </div>
+      ) : (
+        <div style={{ height: 14 }} />
+      )}
+    </Link>
+  )
+}
+
 function IdentitiesKpi() {
   const { data: platforms } = useIdentityPlatforms()
-  // Aggregate across all platforms
-  const totalUsers     = platforms?.reduce((s, p) => s + p.user_count, 0) ?? 0
-  const totalResources = platforms?.reduce((s, p) => s + p.resource_count, 0) ?? 0
 
-  // Use the first platform with data to get a combined summary (best effort)
-  const firstPlatform = platforms?.[0]?.platform ?? ''
-  const { data: summary } = useIdentitySummary(firstPlatform)
-
-  const admins  = summary?.total_admins ?? 0
-  const atRisk  = summary?.users_at_risk ?? 0
-
-  const rows = [
-    { label: 'Total users',   value: totalUsers,     color: 'var(--accent)' },
-    { label: 'Admins',        value: admins,          color: 'var(--sev-critical)' },
-    { label: 'At risk',       value: atRisk,          color: 'var(--sev-high)' },
-    { label: 'Resources',     value: totalResources,  color: 'var(--sev-medium)' },
-  ]
+  if (!platforms || platforms.length === 0) {
+    return (
+      <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>
+        No platforms synced yet.
+      </p>
+    )
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {rows.map((r) => (
-        <div key={r.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{r.label}</span>
-          <span style={{ fontSize: '0.875rem', fontWeight: 700, color: r.color, fontVariantNumeric: 'tabular-nums' }}>
-            {r.value}
-          </span>
-        </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+      {platforms.map((p) => (
+        <PlatformTile key={p.connector_id} p={p} />
       ))}
     </div>
   )
@@ -301,8 +315,11 @@ type PrioritizedQ = ReturnType<typeof usePrioritizedActions>
 type ConnectorsQ  = ReturnType<typeof useConnectors>
 type CrossQ       = ReturnType<typeof useCrossPlatformFindings>
 
+const SEVERITY_GAIN: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 }
+
 function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
   const actions = q.data?.actions ?? []
+  const currentScore = q.data?.posture_score ?? 0
   let body: React.ReactNode
   if (q.isLoading) {
     body = (
@@ -318,28 +335,42 @@ function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
   } else if (actions.length) {
     body = (
       <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
-        {actions.map((a, i) => (
-          <li key={a.finding_id} style={{
-            display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0',
-            borderBottom: i < actions.length - 1 ? '1px solid var(--border)' : 'none',
-          }}>
-            <SeverityBadge severity={a.severity} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {a.title}
-              </p>
-              {a.impact_summary && (
-                <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
-                  {a.impact_summary}
+        {actions.map((a, i) => {
+          const gain = Math.min(SEVERITY_GAIN[a.severity] ?? 0, 100 - currentScore)
+          return (
+            <li key={a.finding_id} style={{
+              display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0',
+              borderBottom: i < actions.length - 1 ? '1px solid var(--border)' : 'none',
+            }}>
+              <SeverityBadge severity={a.severity} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {a.title}
                 </p>
-              )}
-              <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
-                {a.resource_identifier}
-              </p>
-            </div>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }}>{platformLabel(a.platform)}</span>
-          </li>
-        ))}
+                {a.impact_summary && (
+                  <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
+                    {a.impact_summary}
+                  </p>
+                )}
+                <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
+                  {a.resource_identifier}
+                </p>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{platformLabel(a.platform)}</span>
+                {gain > 0 && (
+                  <span style={{
+                    fontSize: '0.625rem', fontWeight: 700, padding: '2px 6px', borderRadius: 10,
+                    background: 'color-mix(in oklch, var(--ok) 12%, transparent)',
+                    color: 'var(--ok)',
+                  }}>
+                    +{gain} pts posture
+                  </span>
+                )}
+              </div>
+            </li>
+          )
+        })}
       </ul>
     )
   } else {
