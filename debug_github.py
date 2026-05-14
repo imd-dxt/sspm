@@ -34,7 +34,7 @@ conn_str = POSTGRES_URL.replace("postgresql+asyncpg://", "postgresql://").replac
 
 conn = psycopg2.connect(conn_str)
 cur  = conn.cursor()
-cur.execute("SELECT id, name, platform_name, credentials_encrypted, config_json FROM connectors WHERE platform_name = 'github'")
+cur.execute("SELECT id, display_name, platform_name, credentials_encrypted, config_json FROM connectors WHERE platform_name = 'github'")
 rows = cur.fetchall()
 cur.close()
 conn.close()
