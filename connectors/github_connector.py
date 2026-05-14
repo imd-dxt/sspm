@@ -262,7 +262,23 @@ class GitHubConnector(BaseConnector):
         return results
 
     def _branch_protection(self, repo: str, branch: str) -> dict[str, Any]:
-        """Return full branch protection posture. 404 → fully unprotected."""
+        """Return full branch protection posture.
+        404 → no rule (fully unprotected).
+        403 → insufficient permissions; treat as unknown/unprotected and warn.
+        """
+        _unprotected = {
+            "branch_protected": False,
+            "allow_force_pushes": True,
+            "allow_deletions": True,
+            "required_pr_reviews": False,
+            "required_approving_review_count": 0,
+            "dismiss_stale_reviews": False,
+            "require_code_owner_reviews": False,
+            "require_status_checks": False,
+            "required_status_check_contexts": [],
+            "require_signed_commits": False,
+            "enforce_admins": False,
+        }
         try:
             data = self._http.get(f"/repos/{self._org}/{repo}/branches/{branch}/protection")
             pr_reviews = data.get("required_pull_request_reviews") or {}
@@ -281,20 +297,18 @@ class GitHubConnector(BaseConnector):
                 "enforce_admins": data.get("enforce_admins", {}).get("enabled", False),
             }
         except requests.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 404:
-                return {
-                    "branch_protected": False,
-                    "allow_force_pushes": True,
-                    "allow_deletions": True,
-                    "required_pr_reviews": False,
-                    "required_approving_review_count": 0,
-                    "dismiss_stale_reviews": False,
-                    "require_code_owner_reviews": False,
-                    "require_status_checks": False,
-                    "required_status_check_contexts": [],
-                    "require_signed_commits": False,
-                    "enforce_admins": False,
-                }
+            status = exc.response.status_code if exc.response is not None else 0
+            if status == 404:
+                return _unprotected
+            if status == 403:
+                self._log.warning(
+                    "github_branch_protection_forbidden",
+                    extra={
+                        "repo": repo,
+                        "hint": "Grant 'Administration: read' (Repository permission) to the GitHub App",
+                    },
+                )
+                return _unprotected
             raise
 
     def _file_exists(self, repo: str, *candidate_paths: str) -> bool:
@@ -360,10 +374,25 @@ class GitHubConnector(BaseConnector):
 
     def fetch_groups(self) -> list[dict[str, Any]]:
         """Fetch teams and normalize each to NormalizedGroup schema."""
-        raw_teams = self._paginate(f"/orgs/{self._org}/teams")
+        try:
+            raw_teams = self._paginate(f"/orgs/{self._org}/teams")
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 403:
+                self._log.warning(
+                    "github_teams_forbidden",
+                    extra={"hint": "Grant 'Members: read' (Organization permission) to the GitHub App"},
+                )
+                return []
+            raise
         groups = []
         for t in raw_teams:
-            members = self._paginate(f"/orgs/{self._org}/teams/{t['slug']}/members")
+            try:
+                members = self._paginate(f"/orgs/{self._org}/teams/{t['slug']}/members")
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 403:
+                    members = []
+                else:
+                    raise
             groups.append(self.normalize_data(
                 {**t, "members": [m["login"] for m in members]},
                 entity_type="group",
@@ -406,10 +435,23 @@ class GitHubConnector(BaseConnector):
         repos = self._paginate(f"/orgs/{self._org}/repos")
 
         for repo in repos:
-            collabs = self._paginate(
-                f"/repos/{self._org}/{repo['name']}/collaborators",
-                params={"affiliation": "all"},
-            )
+            try:
+                collabs = self._paginate(
+                    f"/repos/{self._org}/{repo['name']}/collaborators",
+                    params={"affiliation": "all"},
+                )
+            except requests.HTTPError as exc:
+                if exc.response is not None and exc.response.status_code == 403:
+                    self._log.warning(
+                        "github_collaborators_forbidden",
+                        extra={
+                            "repo": repo["name"],
+                            "hint": "Grant 'Members: read' (Organization permission) to the GitHub App",
+                        },
+                    )
+                    collabs = []
+                else:
+                    raise
 
             explicit: dict[str, dict] = {}
             for c in collabs:
