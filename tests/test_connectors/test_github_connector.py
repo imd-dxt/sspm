@@ -1,9 +1,10 @@
 """
 Unit tests for the GitHub connector.
 
-All external HTTP calls are intercepted with responses/unittest.mock.
-No real GitHub token or network access required.
+All external HTTP calls are intercepted with unittest.mock.
+No real GitHub App or network access required.
 """
+import time
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -13,7 +14,11 @@ from connectors.base_connector import AuthError
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-CREDENTIALS = {"token": "ghp_test_token"}
+CREDENTIALS = {
+    "app_id": "123456",
+    "private_key": "",        # not needed for unit tests — token is pre-seeded
+    "installation_id": "789",
+}
 CONFIG = {"org": "test-org"}
 
 MOCK_USER = {"login": "alice", "id": 1, "name": "Alice Smith", "email": "alice@example.com",
@@ -36,14 +41,23 @@ MOCK_PROTECTION = {
 MOCK_MEMBERSHIP = {"role": "member", "state": "active"}
 
 
+def _make_connector_with_token() -> GitHubConnector:
+    """Create a connector and pre-seed a valid cached installation token."""
+    with patch("utils.http_client.RateLimitedSession"):
+        connector = GitHubConnector(credentials=CREDENTIALS, config=CONFIG)
+    # Bypass _get_installation_token for all unit tests
+    connector._cached_token = "fake_installation_token"
+    connector._token_expires_at = time.time() + 3600
+    return connector
+
+
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
 class TestGitHubConnectorNormalize:
     """Test normalize_data without any HTTP calls."""
 
     def setup_method(self):
-        with patch("utils.http_client.RateLimitedSession"):
-            self.connector = GitHubConnector(credentials=CREDENTIALS, config=CONFIG)
+        self.connector = _make_connector_with_token()
 
     def test_normalize_user(self):
         raw = {**MOCK_USER, "github_role": "member"}
@@ -86,8 +100,6 @@ class TestGitHubConnectorNormalize:
         result = self.connector.normalize_data(raw, "permission")
         assert result["entity_type"] == "permission"
         assert result["role"] == "write"
-        # grantee_id stores the numeric GitHub user ID so it joins against
-        # user.platform_id (also a numeric string); login is kept separately.
         assert result["grantee_id"] == "1"
         assert result["grantee_login"] == "alice"
 
@@ -99,12 +111,11 @@ class TestGitHubConnectorNormalize:
 class TestGitHubConnectorAuth:
 
     def setup_method(self):
-        with patch("utils.http_client.RateLimitedSession"):
-            self.connector = GitHubConnector(credentials=CREDENTIALS, config=CONFIG)
+        self.connector = _make_connector_with_token()
 
     def test_authenticate_success(self):
         self.connector._http = MagicMock()
-        self.connector._http.get.return_value = {"login": "alice"}
+        self.connector._http.get.return_value = {"login": "test-org", "name": "Test Org"}
         assert self.connector.authenticate() is True
 
     def test_authenticate_401_raises_auth_error(self):
@@ -119,27 +130,30 @@ class TestGitHubConnectorAuth:
 
     def test_test_connection_ok(self):
         self.connector._http = MagicMock()
-        self.connector._http.get.side_effect = [
-            {"login": "alice"},           # /user
-            {"login": "test-org", "name": "Test Org"},  # /orgs/test-org
-        ]
-        result = self.connector.test_connection()
+        self.connector._http.get.return_value = {"login": "test-org", "name": "Test Org"}
+
+        mock_app_resp = MagicMock()
+        mock_app_resp.ok = True
+        mock_app_resp.json.return_value = {"name": "My SSPM App", "id": 123456}
+
+        with patch("connectors.github_connector._make_app_jwt", return_value="fake_jwt"):
+            with patch("connectors.github_connector.requests.get", return_value=mock_app_resp):
+                result = self.connector.test_connection()
+
         assert result["ok"] is True
-        assert result["identity"] == "alice"
+        assert result["identity"] == "My SSPM App"
         assert result["org"] == "test-org"
 
 
 class TestGitHubConnectorFetch:
 
     def setup_method(self):
-        with patch("utils.http_client.RateLimitedSession"):
-            self.connector = GitHubConnector(credentials=CREDENTIALS, config=CONFIG)
+        self.connector = _make_connector_with_token()
         self.connector._http = MagicMock()
 
     def test_fetch_users(self):
-        # _paginate stops after the first page when len(data) < 100 — no extra call.
         self.connector._http.get.side_effect = [
-            [MOCK_MEMBER],   # paginate members (1 item < 100 → stops, no page-2 call)
+            [MOCK_MEMBER],   # paginate members (1 item < 100 → stops)
             MOCK_USER,       # /users/alice profile
             MOCK_MEMBERSHIP, # /orgs/.../memberships/alice
         ]
@@ -159,11 +173,8 @@ class TestGitHubConnectorFetch:
         assert groups[0]["name"] == "Backend"
 
     def test_fetch_resources_with_protection(self):
-        # _paginate stops after page 1 (1 item < 100).
-        # _repo_security_features makes several extra HTTP calls; patch it out
-        # so this test stays focused on the branch-protection path.
         self.connector._http.get.side_effect = [
-            [MOCK_REPO],     # repos page 1 (stops, no page-2 call)
+            [MOCK_REPO],     # repos page 1
             MOCK_PROTECTION, # branch protection for api-service/main
         ]
         with patch.object(self.connector, '_repo_security_features', return_value={}):
@@ -179,7 +190,7 @@ class TestGitHubConnectorFetch:
         http_404 = requests.HTTPError(response=mock_resp)
 
         self.connector._http.get.side_effect = [
-            [MOCK_REPO], # repos page 1 (stops, no page-2 call)
+            [MOCK_REPO], # repos page 1
             http_404,    # branch protection → 404 → unprotected defaults
         ]
         with patch.object(self.connector, '_repo_security_features', return_value={}):
