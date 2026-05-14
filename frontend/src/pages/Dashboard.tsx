@@ -488,6 +488,7 @@ export default function Dashboard() {
         <PostureScoreKpi summaryQ={summaryQ} postureQ={postureQ} />
         <OpenFindingsKpi summaryQ={summaryQ} />
         <ActiveConnectorsKpi connectorsQ={connectorsQ} />
+        <ConnectedPlatformsCard />
       </div>
 
       <FindingsTrendCard scanRunsQ={scanRunsQ} />
@@ -495,10 +496,7 @@ export default function Dashboard() {
       {/* Main 2-col grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 300px)', gap: 20, alignItems: 'start' }}>
         <PrioritizedActionsCard q={prioritizedQ} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <ConnectedPlatformsCard />
-          <CrossPlatformRisksCard q={crossPlatformQ} />
-        </div>
+        <CrossPlatformRisksCard q={crossPlatformQ} />
       </div>
     </div>
   )
