@@ -291,7 +291,8 @@ def _build_connector(platform_name: str, credentials: dict, config: dict) -> tup
     """Instantiate the right connector class. Returns (connector, neo4j_org_id)."""
     if platform_name == "github":
         from connectors.github_connector import GitHubConnector
-        return GitHubConnector(credentials=credentials, config=config), config.get("org", "")
+        org = (config.get("org") or credentials.get("org", "")).strip()
+        return GitHubConnector(credentials=credentials, config=config), org
     if platform_name == "jira":
         from connectors.jira_connector import JiraConnector
         return JiraConnector(credentials=credentials, config=config), config.get("domain", "")

@@ -15,14 +15,39 @@ interface FieldDef {
   key: string
   label: string
   placeholder?: string
-  type?: 'text' | 'password'
+  hint?: string
+  type?: 'text' | 'password' | 'textarea'
   isConfig?: boolean
 }
 
 const PLATFORM_FIELDS: Record<PlatformKey, FieldDef[]> = {
   github: [
-    { key: 'token', label: 'API Token', placeholder: 'ghp_...', type: 'password' },
-    { key: 'org', label: 'GitHub Organization', placeholder: 'my-org' },
+    {
+      key: 'app_id',
+      label: 'App ID',
+      placeholder: '123456',
+      hint: 'Found in GitHub → Settings → Developer settings → GitHub Apps → your app',
+    },
+    {
+      key: 'private_key',
+      label: 'Private Key (PEM)',
+      type: 'textarea',
+      placeholder: '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----',
+      hint: 'Download from GitHub App settings → "Generate a private key"',
+    },
+    {
+      key: 'installation_id',
+      label: 'Installation ID',
+      placeholder: '12345678',
+      hint: 'GitHub → your org → Settings → Installed GitHub Apps → Configure → URL ends with /installations/{id}',
+    },
+    {
+      key: 'org',
+      label: 'GitHub Organization',
+      placeholder: 'my-org',
+      hint: 'Your GitHub organization login (e.g. "acme-corp")',
+      isConfig: true,
+    },
   ],
   jira: [
     { key: 'email', label: 'Account Email', placeholder: 'you@company.com' },
@@ -122,6 +147,9 @@ export default function AddConnectorModal({ open, onClose }: Props) {
 
   if (!open) return null
 
+  const selectedLabel = selectedPlatform ? PLATFORMS[selectedPlatform].label : ''
+  const modalTitle = step === 1 ? 'Add Connector' : `Configure ${selectedLabel}`
+
   const content = (
     <>
       {/* Backdrop */}
@@ -133,11 +161,10 @@ export default function AddConnectorModal({ open, onClose }: Props) {
       />
 
       {/* Modal */}
-      <div
+      <dialog
+        open
         className="fixed left-1/2 top-1/2 z-50 w-full max-w-lg -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border shadow-2xl"
-        style={{ background: 'var(--surface)' }}
-        role="dialog"
-        aria-modal="true"
+        style={{ background: 'var(--surface)', padding: 0, margin: 0 }}
         aria-label="Add connector"
       >
         {/* Header */}
@@ -152,9 +179,7 @@ export default function AddConnectorModal({ open, onClose }: Props) {
                 <ChevronLeft size={16} />
               </button>
             )}
-            <h2 className="text-base font-semibold text-text">
-              {step === 1 ? 'Add Connector' : `Configure ${selectedPlatform ? PLATFORMS[selectedPlatform].label : ''}`}
-            </h2>
+            <h2 className="text-base font-semibold text-text">{modalTitle}</h2>
           </div>
           <button onClick={onClose} className="btn-ghost p-1.5" aria-label="Close">
             <X size={16} />
@@ -176,14 +201,16 @@ export default function AddConnectorModal({ open, onClose }: Props) {
         </div>
 
         {/* Success state */}
-        {success ? (
+        {success && (
           <div className="flex flex-col items-center justify-center py-12 gap-3">
             <CheckCircle size={40} style={{ color: 'var(--conn-ok)' }} />
             <p className="text-base font-semibold text-text">Connector added!</p>
             <p className="text-sm text-muted">Redirecting...</p>
           </div>
-        ) : step === 1 ? (
-          /* Step 1: Platform picker */
+        )}
+
+        {/* Step 1: Platform picker */}
+        {!success && step === 1 && (
           <div className="p-6">
             <p className="mb-4 text-sm text-muted">Select the platform you want to connect.</p>
             <div className="grid grid-cols-2 gap-3">
@@ -215,8 +242,10 @@ export default function AddConnectorModal({ open, onClose }: Props) {
               )}
             </div>
           </div>
-        ) : (
-          /* Step 2: Configuration form */
+        )}
+
+        {/* Step 2: Configuration form */}
+        {!success && step === 2 && (
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
             <div>
               <label className="label" htmlFor="display-name">
@@ -238,20 +267,34 @@ export default function AddConnectorModal({ open, onClose }: Props) {
                 <div key={field.key}>
                   <label className="label" htmlFor={`field-${field.key}`}>
                     {field.label}
-                    {field.isConfig && (
-                      <span className="ml-1 text-muted normal-case font-normal">(config)</span>
-                    )}
                   </label>
-                  <input
-                    id={`field-${field.key}`}
-                    type={field.type ?? 'text'}
-                    className="input font-mono"
-                    value={fields[field.key] ?? ''}
-                    onChange={(e) => setField(field.key, e.target.value)}
-                    placeholder={field.placeholder}
-                    required
-                    autoComplete={field.type === 'password' ? 'current-password' : 'off'}
-                  />
+                  {field.type === 'textarea' ? (
+                    <textarea
+                      id={`field-${field.key}`}
+                      className="input font-mono"
+                      style={{ minHeight: 110, resize: 'vertical', fontSize: '0.75rem', lineHeight: 1.5 }}
+                      value={fields[field.key] ?? ''}
+                      onChange={(e) => setField(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                      required
+                    />
+                  ) : (
+                    <input
+                      id={`field-${field.key}`}
+                      type={field.type ?? 'text'}
+                      className="input font-mono"
+                      value={fields[field.key] ?? ''}
+                      onChange={(e) => setField(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                      required
+                      autoComplete={field.type === 'password' ? 'current-password' : 'off'}
+                    />
+                  )}
+                  {field.hint && (
+                    <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                      {field.hint}
+                    </p>
+                  )}
                 </div>
               ))}
 
@@ -282,7 +325,7 @@ export default function AddConnectorModal({ open, onClose }: Props) {
             </div>
           </form>
         )}
-      </div>
+      </dialog>
     </>
   )
 
