@@ -71,7 +71,7 @@ for (cid, name, platform, creds_enc, config) in rows:
 
     # ── build connector ───────────────────────────────────────────────────────
     try:
-        gh = GitHubConnector(connector_id=str(cid), credentials=credentials, config=config or {})
+        gh = GitHubConnector(credentials=credentials, config=config or {})
     except Exception as exc:
         print(f"[ERROR] Could not instantiate GitHubConnector: {exc}")
         continue
