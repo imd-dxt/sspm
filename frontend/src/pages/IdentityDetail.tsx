@@ -279,9 +279,11 @@ function RepositoriesTab({ platform }: Readonly<{ platform: string }>) {
   const { data: rawResources, isLoading } = useIdentityResources(platform, undefined, 500)
 
   const repos = useMemo(() => {
-    const base = (rawResources ?? []).filter(
-      (r) => r.resource_type === 'repository' || r.resource_type === 'repo',
-    )
+    const all = rawResources ?? []
+    // Include explicit repository type OR null (GitHub repos may not have a subtype yet)
+    const base = all.some((r) => r.resource_type === 'repository' || r.resource_type === 'repo')
+      ? all.filter((r) => r.resource_type === 'repository' || r.resource_type === 'repo')
+      : all.filter((r) => !GROUP_TYPES.has(r.resource_type ?? '') && !ROLE_TYPES.has(r.resource_type ?? ''))
     if (!search.trim()) return base
     const q = search.toLowerCase()
     return base.filter((r) => r.name.toLowerCase().includes(q))

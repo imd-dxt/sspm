@@ -99,7 +99,7 @@ export default function PlatformLogo({ platform, size = 34 }: Readonly<Props>) {
     return (
       <span style={baseStyle}>
         <img
-          src="/logos/hps.png"
+          src="/logos/entraid.png"
           alt="Microsoft Entra ID"
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         />

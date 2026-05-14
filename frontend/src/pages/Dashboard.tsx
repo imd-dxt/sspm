@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ShieldCheck, AlertTriangle, Plug, Users, ArrowRight, TrendingUp } from 'lucide-react'
+import { ShieldCheck, AlertTriangle, Plug, ArrowRight, TrendingUp } from 'lucide-react'
 import {
   RadialBarChart, RadialBar, PolarRadiusAxis, Label,
   AreaChart, Area, XAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -154,51 +154,76 @@ function SeverityBar({ critical, high, medium, low }: Readonly<SevCounts>) {
   )
 }
 
-// ── Identities overview KPI ─────────────────────────────────────────────────
-function PlatformTile({ p }: Readonly<{ p: IdentityPlatform }>) {
+// ── Connected Platforms card (replaces Identities KPI + Connector Coverage) ───
+function ConnectedPlatformRow({ p }: Readonly<{ p: IdentityPlatform }>) {
   const { data: posture } = usePostureScore(p.platform)
   const alerts = posture?.total_open_findings ?? 0
   return (
     <Link
       to={`/identities/${p.platform}`}
       style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
-        padding: '10px 6px', borderRadius: 10, border: '1px solid var(--border)',
-        background: 'var(--surface-2)', textDecoration: 'none', transition: 'background 0.12s',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 10px', borderRadius: 8, textDecoration: 'none',
+        transition: 'background 0.12s',
       }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
-      <PlatformLogo platform={p.platform} size={30} />
-      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--text)', textAlign: 'center', lineHeight: 1.2, margin: 0 }}>
-        {platformLabel(p.platform)}
-      </p>
+      <PlatformLogo platform={p.platform} size={28} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {p.connector_name || platformLabel(p.platform)}
+        </p>
+        <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 1 }}>
+          {platformLabel(p.platform)}
+        </p>
+      </div>
       {alerts > 0 ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          <AlertTriangle size={10} style={{ color: 'var(--sev-medium)' }} />
-          <span style={{ fontSize: '0.625rem', fontWeight: 700, color: 'var(--sev-medium)', fontVariantNumeric: 'tabular-nums' }}>{alerts}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, padding: '3px 8px', borderRadius: 20, background: 'color-mix(in oklch, var(--sev-medium) 10%, transparent)' }}>
+          <AlertTriangle size={11} style={{ color: 'var(--sev-medium)' }} />
+          <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: 'var(--sev-medium)', fontVariantNumeric: 'tabular-nums' }}>{alerts}</span>
         </div>
       ) : (
-        <div style={{ height: 14 }} />
+        <span className="status-dot ok" />
       )}
     </Link>
   )
 }
 
-function IdentitiesKpi() {
-  const { data: platforms } = useIdentityPlatforms()
-
-  if (!platforms || platforms.length === 0) {
-    return (
-      <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', padding: '16px 0', textAlign: 'center' }}>
-        No platforms synced yet.
-      </p>
+function ConnectedPlatformsCard() {
+  const { data: platforms, isLoading } = useIdentityPlatforms()
+  let body: React.ReactNode
+  if (isLoading) {
+    body = (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {[1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 36, borderRadius: 8 }} />)}
+      </div>
+    )
+  } else if (!platforms || platforms.length === 0) {
+    body = (
+      <div style={{ textAlign: 'center', padding: '16px 0' }}>
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>No platforms synced yet.</p>
+        <Link to="/connectors" style={{ fontSize: '0.75rem', color: 'var(--accent)', marginTop: 6, display: 'inline-block' }}>Add a connector →</Link>
+      </div>
+    )
+  } else {
+    body = (
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {platforms.map((p) => (
+          <li key={p.connector_id}><ConnectedPlatformRow p={p} /></li>
+        ))}
+      </ul>
     )
   }
-
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-      {platforms.map((p) => (
-        <PlatformTile key={p.connector_id} p={p} />
-      ))}
+    <div className="card" style={{ padding: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)' }}>Connected Platforms</h2>
+        <Link to="/identities" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: 'var(--text-muted)', textDecoration: 'none' }}>
+          Identities <ArrowRight size={12} />
+        </Link>
+      </div>
+      {body}
     </div>
   )
 }
@@ -400,60 +425,6 @@ function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
   )
 }
 
-function connectorDotClass(ok: boolean | null): string {
-  if (ok === true) return 'ok'
-  if (ok === false) return 'err'
-  return ''
-}
-
-function ConnectorCoverageCard({ q }: Readonly<{ q: ConnectorsQ }>) {
-  const connectors = q.data ?? []
-  let body: React.ReactNode
-  if (q.isLoading) {
-    body = (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {[1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 36, borderRadius: 8 }} />)}
-      </div>
-    )
-  } else if (connectors.length === 0) {
-    body = (
-      <div style={{ textAlign: 'center', padding: '16px 0' }}>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>No connectors yet.</p>
-        <Link to="/connectors" style={{ fontSize: '0.75rem', color: 'var(--accent)', marginTop: 6, display: 'inline-block' }}>Add one →</Link>
-      </div>
-    )
-  } else {
-    body = (
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {connectors.map((c) => (
-          <li key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 8, transition: 'background 0.12s' }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
-            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-          >
-            <PlatformLogo platform={c.platform_name} size={28} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.display_name}</p>
-              <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: 1 }}>{platformLabel(c.platform_name)}</p>
-            </div>
-            <span className={`status-dot ${connectorDotClass(c.connection_ok)}`} />
-          </li>
-        ))}
-      </ul>
-    )
-  }
-  return (
-    <div className="card" style={{ padding: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)' }}>Connector Coverage</h2>
-        <Link to="/connectors" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: 'var(--text-muted)', textDecoration: 'none' }}>
-          Manage <ArrowRight size={12} />
-        </Link>
-      </div>
-      {body}
-    </div>
-  )
-}
-
 function CrossPlatformRisksCard({ q }: Readonly<{ q: CrossQ }>) {
   const risks = q.data ?? []
   let body: React.ReactNode
@@ -517,32 +488,15 @@ export default function Dashboard() {
         <PostureScoreKpi summaryQ={summaryQ} postureQ={postureQ} />
         <OpenFindingsKpi summaryQ={summaryQ} />
         <ActiveConnectorsKpi connectorsQ={connectorsQ} />
-
-        {/* Identities Overview */}
-        <div className="kpi-card" style={{ gap: 12 }}>
-          <div className="kpi-top">
-            <span className="kpi-label">Identities</span>
-            <Link to="/identities" style={{ color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-              <Users size={16} />
-            </Link>
-          </div>
-          <IdentitiesKpi />
-          <Link
-            to="/identities"
-            style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.6875rem', color: 'var(--accent)', textDecoration: 'none', marginTop: 'auto' }}
-          >
-            View identities <ArrowRight size={11} />
-          </Link>
-        </div>
       </div>
 
       <FindingsTrendCard scanRunsQ={scanRunsQ} />
 
       {/* Main 2-col grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 20, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 300px)', gap: 20, alignItems: 'start' }}>
         <PrioritizedActionsCard q={prioritizedQ} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <ConnectorCoverageCard q={connectorsQ} />
+          <ConnectedPlatformsCard />
           <CrossPlatformRisksCard q={crossPlatformQ} />
         </div>
       </div>

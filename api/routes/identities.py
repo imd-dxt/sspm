@@ -324,6 +324,10 @@ def _entity_resource_type(entity: NormalizedEntity) -> str | None:
     d = entity.data_json or {}
     if entity.entity_type == "group":
         return d.get("metadata", {}).get("entity_subtype") or "group"
+    # GitHub resources use resource_subtype (e.g. "repository"); check it first
+    subtype = d.get("resource_subtype") or d.get("metadata", {}).get("resource_subtype")
+    if subtype:
+        return subtype
     return d.get("resource_type") or d.get("type")
 
 
