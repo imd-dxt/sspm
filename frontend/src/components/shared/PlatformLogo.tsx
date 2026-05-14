@@ -23,14 +23,6 @@ function JiraMark() {
   )
 }
 
-function EntraIDMark() {
-  return (
-    <svg viewBox="0 0 18 18" fill="none" width="60%" height="60%" aria-hidden="true">
-      <path d="M9 1.5 1.5 5.75v6.5L9 16.5l7.5-4.25v-6.5L9 1.5Z" fill="none" stroke="white" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="M9 1.5v15M1.5 5.75 9 10l7.5-4.25" stroke="white" strokeWidth="1.4" strokeLinejoin="round" />
-    </svg>
-  )
-}
 
 const PLATFORM_BG: Record<string, string> = {
   github:     '#24292e',
