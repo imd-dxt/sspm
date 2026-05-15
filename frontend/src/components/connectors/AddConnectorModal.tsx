@@ -23,23 +23,11 @@ interface FieldDef {
 const PLATFORM_FIELDS: Record<PlatformKey, FieldDef[]> = {
   github: [
     {
-      key: 'app_id',
-      label: 'App ID',
-      placeholder: '123456',
-      hint: 'Found in GitHub → Settings → Developer settings → GitHub Apps → your app',
-    },
-    {
-      key: 'private_key',
-      label: 'Private Key (PEM)',
-      type: 'textarea',
-      placeholder: '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----',
-      hint: 'Download from GitHub App settings → "Generate a private key"',
-    },
-    {
-      key: 'installation_id',
-      label: 'Installation ID',
-      placeholder: '12345678',
-      hint: 'GitHub → your org → Settings → Installed GitHub Apps → Configure → URL ends with /installations/{id}',
+      key: 'token',
+      label: 'Personal Access Token',
+      type: 'password',
+      placeholder: 'ghp_xxxxxxxxxxxxxxxxxxxx',
+      hint: 'GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic). Required scopes: read:org, repo',
     },
     {
       key: 'org',

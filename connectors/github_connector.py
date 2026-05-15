@@ -86,30 +86,36 @@ def _make_app_jwt(app_id: str, private_key_pem: str) -> str:
 
 
 class GitHubConnector(BaseConnector):
-    """GitHub organisation connector — authenticates via GitHub App."""
+    """GitHub organisation connector.
+
+    Supports two auth modes detected automatically from credentials:
+      PAT mode  — credentials: {"token": "ghp_xxx"}
+      App mode  — credentials: {"app_id": "...", "private_key": "...", "installation_id": "..."}
+    Config must contain: {"org": "my-org"}
+    """
 
     platform_name = "github"
 
     def __init__(self, credentials: dict[str, str], config: dict[str, Any] | None = None):
         super().__init__(credentials, config)
 
+        cfg = config or {}
+        self._org: str = (cfg.get("org") or credentials.get("org", "")).strip()
+        base_url: str = (cfg.get("base_url") or credentials.get("base_url") or _GITHUB_API).rstrip("/")
+
+        # ── Detect auth mode ──────────────────────────────────────────────────
+        self._pat: str = credentials.get("token", "").strip()
         self._app_id = str(credentials.get("app_id", "")).strip()
         self._private_key = credentials.get("private_key", "").strip()
         self._installation_id = str(credentials.get("installation_id", "")).strip()
-
-        # org can come from config (preferred) or credentials (legacy)
-        cfg = config or {}
-        self._org: str = (cfg.get("org") or credentials.get("org", "")).strip()
-
-        base_url: str = (cfg.get("base_url") or credentials.get("base_url") or _GITHUB_API).rstrip("/")
+        self._use_pat: bool = bool(self._pat)
 
         self._http = RateLimitedSession(
-            rate_limit_rps=1.38,  # 5000/hr
+            rate_limit_rps=1.38,
             max_retries=3,
             timeout=30,
             base_url=base_url,
         )
-        # Set static headers — Authorization is filled in by _ensure_token()
         self._http.update_headers({
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -121,16 +127,12 @@ class GitHubConnector(BaseConnector):
     # ── Token management ──────────────────────────────────────────────────────
 
     def _get_installation_token(self) -> str:
-        """
-        Exchange the GitHub App JWT for an installation access token.
-        Raises AuthError on any credential failure.
-        """
+        """Exchange GitHub App JWT for an installation access token."""
         if not self._app_id or not self._private_key or not self._installation_id:
             raise AuthError(
                 "GitHub App credentials incomplete. "
-                "Provide app_id, private_key, and installation_id."
+                "Provide app_id, private_key, and installation_id — or use a PAT (token)."
             )
-
         try:
             jwt_token = _make_app_jwt(self._app_id, self._private_key)
         except Exception as exc:
@@ -150,15 +152,9 @@ class GitHubConnector(BaseConnector):
         except requests.HTTPError as exc:
             status = exc.response.status_code if exc.response is not None else 0
             if status in (401, 403):
-                raise AuthError(
-                    "GitHub App token exchange failed (401/403). "
-                    "Check App ID, private key, and installation ID."
-                ) from exc
+                raise AuthError("GitHub App token exchange failed (401/403).") from exc
             if status == 404:
-                raise AuthError(
-                    f"Installation ID {self._installation_id!r} not found. "
-                    "Check the installation ID in GitHub App settings."
-                ) from exc
+                raise AuthError(f"Installation ID {self._installation_id!r} not found.") from exc
             raise NetworkError(str(exc)) from exc
 
         data = resp.json()
@@ -166,7 +162,6 @@ class GitHubConnector(BaseConnector):
         if not token:
             raise AuthError("GitHub API returned empty installation token.")
 
-        # Cache the token expiry
         expires_at_str = data.get("expires_at")
         if expires_at_str:
             try:
@@ -181,7 +176,15 @@ class GitHubConnector(BaseConnector):
         return token
 
     def _ensure_token(self) -> None:
-        """Refresh the installation token if expired (5-min buffer) and update HTTP headers."""
+        """Set the Authorization header — PAT is static, App token refreshes on expiry."""
+        if self._use_pat:
+            if not self._cached_token:
+                if not self._pat:
+                    raise AuthError("GitHub PAT (token) is missing from credentials.")
+                self._http.update_headers({"Authorization": f"token {self._pat}"})
+                self._cached_token = self._pat
+            return
+        # GitHub App path — refresh when within 5 min of expiry
         if self._cached_token and time.time() < self._token_expires_at - 300:
             return
         token = self._get_installation_token()
@@ -195,18 +198,18 @@ class GitHubConnector(BaseConnector):
             if self._org:
                 self._http.get(f"/orgs/{self._org}")
             else:
-                # List first repo accessible by this installation as a health-check
-                self._http.get("/installation/repositories", params={"per_page": 1})
+                self._http.get("/user")
             self._log.info(
-                "github_app_authenticated",
-                extra={"app_id": self._app_id, "org": self._org},
+                "github_authenticated",
+                extra={"mode": "pat" if self._use_pat else "app", "org": self._org},
             )
             return True
         except requests.HTTPError as exc:
             if exc.response is not None and exc.response.status_code in (401, 403):
                 raise AuthError(
-                    "GitHub App access denied. Ensure the app is installed on "
-                    f"org '{self._org}' with the required permissions."
+                    "GitHub authentication failed. "
+                    + ("Check your PAT scopes (read:org, repo required)." if self._use_pat
+                       else f"Ensure the app is installed on org '{self._org}'.")
                 ) from exc
             raise NetworkError(str(exc)) from exc
 
@@ -214,31 +217,14 @@ class GitHubConnector(BaseConnector):
         self._ensure_token()
         try:
             org_data = self._http.get(f"/orgs/{self._org}") if self._org else {}
-
-            # Fetch app metadata via JWT (separate request — installation token can't call /app)
-            try:
-                jwt_token = _make_app_jwt(self._app_id, self._private_key)
-                app_resp = requests.get(
-                    f"{_GITHUB_API}/app",
-                    headers={
-                        "Authorization": f"Bearer {jwt_token}",
-                        "Accept": "application/vnd.github+json",
-                        "X-GitHub-Api-Version": "2022-11-28",
-                    },
-                    timeout=30,
-                )
-                app_data = app_resp.json() if app_resp.ok else {}
-            except Exception:
-                app_data = {}
-
+            user_data = self._http.get("/user") if self._use_pat else {}
             return {
                 "ok": True,
                 "platform": "github",
-                "identity": app_data.get("name") or f"App {self._app_id}",
-                "app_id": self._app_id,
-                "installation_id": self._installation_id,
+                "identity": user_data.get("login") or (f"App {self._app_id}" if self._app_id else "unknown"),
                 "org": org_data.get("login") or self._org,
                 "org_name": org_data.get("name"),
+                "mode": "pat" if self._use_pat else "app",
             }
         except Exception as exc:
             return {"ok": False, "platform": "github", "error": str(exc)}
