@@ -9,9 +9,9 @@ const PAGE_TITLES: Record<string, string> = {
   '/connectors': 'Connectors',
   '/findings': 'Findings',
   '/third-party-apps': 'Third-Party Apps',
+  '/compliance': 'Compliance Reports',
   '/rules': 'Rules',
   '/identities': 'Identities',
-  '/scan-runs': 'Scan Runs',
   '/settings': 'Settings',
 }
 

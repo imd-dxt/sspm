@@ -342,6 +342,14 @@ type CrossQ       = ReturnType<typeof useCrossPlatformFindings>
 
 const SEVERITY_GAIN: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 }
 
+function calcGain(a: { severity: string; impact_factor: number }, source: string | undefined, currentScore: number): number {
+  const room = 100 - currentScore
+  if (source === 'ollama' && a.impact_factor > 0) {
+    return Math.min(Math.round(a.impact_factor * 10), room)
+  }
+  return Math.min(SEVERITY_GAIN[a.severity] ?? 0, room)
+}
+
 function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
   const actions = q.data?.actions ?? []
   const currentScore = q.data?.posture_score ?? 0
@@ -361,7 +369,7 @@ function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
     body = (
       <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
         {actions.map((a, i) => {
-          const gain = Math.min(SEVERITY_GAIN[a.severity] ?? 0, 100 - currentScore)
+          const gain = calcGain(a, q.data?.source, currentScore)
           return (
             <li key={a.finding_id} style={{
               display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0',

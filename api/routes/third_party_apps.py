@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
-from database.models import Connector, Finding
+from database.models import Connector, Finding, NormalizedEntity
 from database.session import get_db
 
 router = APIRouter(prefix="/third-party-apps", tags=["third-party-apps"])
@@ -100,9 +100,10 @@ def list_third_party_apps(db: DB) -> ThirdPartyAppSummary:
     # For each app, find the highest open severity
     severity_order = ["critical", "high", "medium", "low", "info"]
 
-    apps: list[ThirdPartyApp] = []
+    # Build findings-based apps, keyed by (platform, resource_identifier)
+    apps_by_key: dict[tuple[str, str], ThirdPartyApp] = {}
+
     for row in rows:
-        # Query highest severity open finding for this resource
         sev_row = (
             db.query(Finding.severity)
             .filter(
@@ -126,24 +127,74 @@ def list_third_party_apps(db: DB) -> ThirdPartyAppSummary:
         except (TypeError, ValueError):
             pass
 
-        apps.append(
-            ThirdPartyApp(
-                id=f"{row.platform}:{row.resource_identifier}",
-                name=row.resource_identifier,
-                resource_type=row.resource_type or "app",
-                platform=row.platform,
-                connector_id=row.connector_id,
-                connector_name=row.connector_name,
-                findings_count=row.findings_count,
-                open_findings=open_count,
-                highest_severity=highest,
-                first_seen=row.first_seen.isoformat() if row.first_seen else None,
-                last_seen=row.last_seen.isoformat() if row.last_seen else None,
-            )
+        key = (row.platform, row.resource_identifier)
+        apps_by_key[key] = ThirdPartyApp(
+            id=f"{row.platform}:{row.resource_identifier}",
+            name=row.resource_identifier,
+            resource_type=row.resource_type or "app",
+            platform=row.platform,
+            connector_id=row.connector_id,
+            connector_name=row.connector_name,
+            findings_count=row.findings_count,
+            open_findings=open_count,
+            highest_severity=highest,
+            first_seen=row.first_seen.isoformat() if row.first_seen else None,
+            last_seen=row.last_seen.isoformat() if row.last_seen else None,
         )
 
+    # Also surface app entities from NormalizedEntity (e.g. Entra app registrations
+    # that haven't triggered a finding yet — they still deserve visibility)
+    entity_rows = (
+        db.query(NormalizedEntity)
+        .filter(NormalizedEntity.entity_type == "application")
+        .all()
+    )
+    for ent in entity_rows:
+        data = ent.data_json or {}
+        name = (
+            data.get("name")
+            or data.get("display_name")
+            or data.get("app_name")
+            or ent.platform_id
+        )
+        key = (ent.platform, name)
+        if key in apps_by_key:
+            continue  # already captured via findings
+
+        # Count findings for this entity from the findings table
+        finding_rows = (
+            db.query(Finding.severity, Finding.status)
+            .filter(
+                Finding.platform == ent.platform,
+                Finding.resource_identifier == name,
+            )
+            .all()
+        )
+        total_f = len(finding_rows)
+        open_f = sum(1 for f in finding_rows if f.status == "open")
+        open_sevs = [f.severity for f in finding_rows if f.status == "open"]
+        highest = None
+        for s in severity_order:
+            if s in open_sevs:
+                highest = s
+                break
+
+        apps_by_key[key] = ThirdPartyApp(
+            id=f"{ent.platform}:{name}",
+            name=name,
+            resource_type=data.get("entity_subtype") or "application",
+            platform=ent.platform,
+            connector_id=None,
+            connector_name=None,
+            findings_count=total_f,
+            open_findings=open_f,
+            highest_severity=highest,
+            first_seen=ent.created_at.isoformat() if ent.created_at else None,
+            last_seen=ent.updated_at.isoformat() if ent.updated_at else None,
+        )
+
+    apps = list(apps_by_key.values())
     risky = sum(1 for a in apps if a.highest_severity in ("critical", "high"))
-    connector_ids = {a.connector_id for a in apps if a.connector_id}
 
     return ThirdPartyAppSummary(
         total_apps=len(apps),

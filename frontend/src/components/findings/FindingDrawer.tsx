@@ -9,7 +9,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import type { Finding } from '../../api/types'
-import { useUpdateFindingStatus } from '../../api/findings'
+import { useUpdateFindingStatus, useRemediateFinding } from '../../api/findings'
 import SeverityBadge from './SeverityBadge'
 import {
   formatRelative,
@@ -46,6 +46,7 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
   const drawerRef = useRef<HTMLDivElement>(null)
 
   const updateStatus = useUpdateFindingStatus()
+  const remediate = useRemediateFinding()
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -219,9 +220,9 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
           )}
 
           {/* Remediation */}
-          {(finding.generated_remediation || finding.remediation) && (
-            <section>
-              <p className="label">
+          <section>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <p className="label" style={{ marginBottom: 0 }}>
                 Remediation
                 {finding.remediation_source === 'ollama' && (
                   <span style={{ fontWeight: 400, color: 'var(--accent)', marginLeft: 6, textTransform: 'none', fontSize: '0.6875rem' }}>
@@ -229,19 +230,47 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
                   </span>
                 )}
               </p>
-              <p style={{ fontSize: '0.875rem', color: 'var(--text)', whiteSpace: 'pre-line' }}>
-                {finding.generated_remediation || finding.remediation}
-              </p>
-              {finding.generated_remediation && finding.remediation && finding.remediation !== finding.generated_remediation && (
-                <details style={{ marginTop: 8 }}>
-                  <summary style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
-                    Show static remediation
-                  </summary>
-                  <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: 8, whiteSpace: 'pre-line' }}>{finding.remediation}</p>
-                </details>
+              {finding.status === 'open' && (
+                <button
+                  onClick={() => remediate.mutate(finding.id)}
+                  disabled={remediate.isPending}
+                  className="btn-ghost"
+                  style={{ fontSize: '0.6875rem', padding: '3px 8px', gap: 4 }}
+                  title="Generate AI remediation with Ollama"
+                >
+                  {remediate.isPending
+                    ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+                    : <span style={{ fontSize: 11 }}>✦</span>
+                  }
+                  {remediate.isPending ? 'Generating…' : 'AI Remediation'}
+                </button>
               )}
-            </section>
-          )}
+            </div>
+            {remediate.isError && (
+              <p style={{ fontSize: '0.75rem', color: 'var(--sev-critical)', marginBottom: 6 }}>
+                Ollama unavailable — try again later.
+              </p>
+            )}
+            {(finding.generated_remediation || finding.remediation) ? (
+              <>
+                <p style={{ fontSize: '0.875rem', color: 'var(--text)', whiteSpace: 'pre-line' }}>
+                  {finding.generated_remediation || finding.remediation}
+                </p>
+                {finding.generated_remediation && finding.remediation && finding.remediation !== finding.generated_remediation && (
+                  <details style={{ marginTop: 8 }}>
+                    <summary style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none' }}>
+                      Show static remediation
+                    </summary>
+                    <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginTop: 8, whiteSpace: 'pre-line' }}>{finding.remediation}</p>
+                  </details>
+                )}
+              </>
+            ) : (
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                No remediation guidance yet — click "AI Remediation" to generate one.
+              </p>
+            )}
+          </section>
 
           {/* Justification */}
           {finding.justification && (

@@ -99,3 +99,14 @@ export function useAnalyzeFinding() {
     },
   })
 }
+
+export function useRemediateFinding() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => post<Finding>(`/findings/${id}/remediate`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['findings'] })
+      void queryClient.invalidateQueries({ queryKey: ['prioritized-actions'] })
+    },
+  })
+}

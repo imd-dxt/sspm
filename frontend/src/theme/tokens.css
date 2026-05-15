@@ -190,22 +190,25 @@
     flex-shrink: 0;
   }
 
-  /* White pill keeps the logo legible in both light and dark mode */
   .app-header-logo-wrap {
-    background: white;
     border-radius: 6px;
     padding: 4px 12px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.10);
   }
 
   .app-header-logo {
-    height: 20px;
+    height: 22px;
     width: auto;
     object-fit: contain;
     display: block;
+    transition: filter 0.2s;
+  }
+
+  [data-theme="dark"] .app-header-logo,
+  .dark .app-header-logo {
+    filter: brightness(0) invert(1);
   }
 
   /* ── APP SHELL ────────────────────────────────────────────── */

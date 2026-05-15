@@ -10,6 +10,7 @@ import Identities from './pages/Identities'
 import IdentityDetail from './pages/IdentityDetail'
 import Settings from './pages/Settings'
 import ThirdPartyApps from './pages/ThirdPartyApps'
+import Compliance from './pages/Compliance'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="identities" element={<Identities />} />
             <Route path="identities/:platform" element={<IdentityDetail />} />
             <Route path="third-party-apps" element={<ThirdPartyApps />} />
+            <Route path="compliance" element={<Compliance />} />
             <Route path="settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

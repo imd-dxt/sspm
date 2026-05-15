@@ -11,6 +11,7 @@ import {
   AppWindow,
   ChevronsLeft,
   ChevronsRight,
+  ClipboardList,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
@@ -25,6 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/connectors', label: 'Connectors', icon: <Plug size={16} /> },
   { to: '/findings', label: 'Findings', icon: <ShieldAlert size={16} /> },
   { to: '/third-party-apps', label: 'Third-Party Apps', icon: <AppWindow size={16} /> },
+  { to: '/compliance', label: 'Compliance', icon: <ClipboardList size={16} /> },
   { to: '/rules', label: 'Rules', icon: <BookOpen size={16} /> },
   { to: '/identities', label: 'SaaS Identities', icon: <Users size={16} /> },
   { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },

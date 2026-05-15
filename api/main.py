@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from config.logging_config import configure_logging
 from config.settings import settings
-from api.routes import connectors, findings, rules, scan_runs, third_party_apps, identities, activity_logs, posture
+from api.routes import connectors, findings, rules, scan_runs, third_party_apps, identities, activity_logs, posture, compliance
 
 API_V1 = "/api/v1"
 
@@ -177,6 +177,7 @@ app.include_router(third_party_apps.router, prefix=API_V1)
 app.include_router(identities.router, prefix=API_V1)
 app.include_router(activity_logs.router, prefix=API_V1)
 app.include_router(posture.router, prefix=API_V1)
+app.include_router(compliance.router, prefix=API_V1)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
