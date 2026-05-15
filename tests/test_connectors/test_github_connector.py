@@ -132,16 +132,10 @@ class TestGitHubConnectorAuth:
         self.connector._http = MagicMock()
         self.connector._http.get.return_value = {"login": "test-org", "name": "Test Org"}
 
-        mock_app_resp = MagicMock()
-        mock_app_resp.ok = True
-        mock_app_resp.json.return_value = {"name": "My SSPM App", "id": 123456}
-
-        with patch("connectors.github_connector._make_app_jwt", return_value="fake_jwt"):
-            with patch("connectors.github_connector.requests.get", return_value=mock_app_resp):
-                result = self.connector.test_connection()
+        result = self.connector.test_connection()
 
         assert result["ok"] is True
-        assert result["identity"] == "My SSPM App"
+        assert result["identity"] == "App 123456"  # App mode: identity derived from app_id
         assert result["org"] == "test-org"
 
 
