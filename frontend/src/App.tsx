@@ -3,14 +3,13 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Layout from './components/layout/Layout'
 import Dashboard from './pages/Dashboard'
 import Connectors from './pages/Connectors'
+import ConnectorDetail from './pages/ConnectorDetail'
 import Findings from './pages/Findings'
 import Rules from './pages/Rules'
 import Identities from './pages/Identities'
 import IdentityDetail from './pages/IdentityDetail'
-import ScanRuns from './pages/ScanRuns'
 import Settings from './pages/Settings'
 import ThirdPartyApps from './pages/ThirdPartyApps'
-import ActivityLogs from './pages/ActivityLogs'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,13 +30,12 @@ export default function App() {
           <Route element={<Layout />}>
             <Route index element={<Dashboard />} />
             <Route path="connectors" element={<Connectors />} />
+            <Route path="connectors/:id" element={<ConnectorDetail />} />
             <Route path="findings" element={<Findings />} />
             <Route path="rules" element={<Rules />} />
             <Route path="identities" element={<Identities />} />
             <Route path="identities/:platform" element={<IdentityDetail />} />
-            <Route path="scan-runs" element={<ScanRuns />} />
             <Route path="third-party-apps" element={<ThirdPartyApps />} />
-            <Route path="activity-logs" element={<ActivityLogs />} />
             <Route path="settings" element={<Settings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

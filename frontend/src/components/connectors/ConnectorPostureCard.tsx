@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { RefreshCw, Zap, Trash2, ChevronDown, Loader2, AlertCircle, Check } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { RefreshCw, Zap, Trash2, ChevronDown, Loader2, AlertCircle, Check, History } from 'lucide-react'
 import { RadialBarChart, RadialBar, PolarGrid, PolarRadiusAxis, Label } from 'recharts'
 import PlatformLogo from '../shared/PlatformLogo'
 import { usePostureScore } from '../../api/posture'
@@ -23,6 +24,7 @@ export default function ConnectorPostureCard({ connector }: Readonly<{ connector
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
   const [scheduleOpen, setScheduleOpen] = useState(false)
   const scheduleRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
 
   const sync = useSyncConnector()
   const del = useDeleteConnector()
@@ -254,6 +256,9 @@ export default function ConnectorPostureCard({ connector }: Readonly<{ connector
             <button onClick={handleTest} disabled={test.isPending} className="btn-sm" title="Test connection">
               {test.isPending ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Zap size={13} />}
               Test
+            </button>
+            <button onClick={() => navigate(`/connectors/${connector.id}`)} className="btn-sm" title="Scan history" style={{ padding: '6px 8px' }}>
+              <History size={13} />
             </button>
             <button onClick={() => setConfirmDelete(true)} className="btn-sm" title="Delete" style={{ padding: '6px 8px' }}>
               <Trash2 size={13} />

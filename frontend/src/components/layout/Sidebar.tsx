@@ -5,8 +5,6 @@ import {
   ShieldAlert,
   BookOpen,
   Users,
-  Activity,
-  ScrollText,
   Settings,
   Sun,
   Moon,
@@ -29,8 +27,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/third-party-apps', label: 'Third-Party Apps', icon: <AppWindow size={16} /> },
   { to: '/rules', label: 'Rules', icon: <BookOpen size={16} /> },
   { to: '/identities', label: 'SaaS Identities', icon: <Users size={16} /> },
-  { to: '/activity-logs', label: 'Activity Logs', icon: <ScrollText size={16} /> },
-  { to: '/scan-runs', label: 'Scan Runs', icon: <Activity size={16} /> },
   { to: '/settings', label: 'Settings', icon: <Settings size={16} /> },
 ]
 

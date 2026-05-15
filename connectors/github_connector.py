@@ -350,9 +350,53 @@ class GitHubConnector(BaseConnector):
         data = self._http.get(f"/orgs/{self._org}")
         return [self.normalize_data(data, entity_type="org")]
 
+    def _collect_unique_collaborators(self) -> list[dict[str, Any]]:
+        """Collect unique users across all repo collaborators (fallback when members API is empty)."""
+        seen: dict[str, dict] = {}
+        try:
+            repos = self._paginate(f"/orgs/{self._org}/repos")
+        except Exception:
+            return []
+        for repo in repos:
+            try:
+                collabs = self._paginate(
+                    f"/repos/{self._org}/{repo['name']}/collaborators",
+                    params={"affiliation": "all"},
+                )
+            except Exception:
+                continue
+            for c in collabs:
+                login = c.get("login", "")
+                if login and login not in seen:
+                    seen[login] = c
+        self._log.info("collaborator_fallback_users", extra={"count": len(seen)})
+        return list(seen.values())
+
     def fetch_users(self) -> list[dict[str, Any]]:
-        """Fetch org members and normalize each to NormalizedUser schema."""
-        raw_members = self._paginate(f"/orgs/{self._org}/members")
+        """Fetch org members and normalize each to NormalizedUser schema.
+
+        Falls back to repo collaborators when the members API returns empty
+        (happens when the GitHub App lacks Members:Read or all memberships are private).
+        """
+        try:
+            raw_members = self._paginate(f"/orgs/{self._org}/members")
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 403:
+                self._log.warning(
+                    "github_members_forbidden",
+                    extra={"hint": "Grant 'Members: read' (Organization permission) to the GitHub App"},
+                )
+                raw_members = []
+            else:
+                raise
+
+        if not raw_members:
+            self._log.warning(
+                "github_members_empty_fallback",
+                extra={"hint": "Members API returned 0 results; using repo collaborators as fallback"},
+            )
+            raw_members = self._collect_unique_collaborators()
+
         users = []
         for m in raw_members:
             try:
@@ -464,16 +508,17 @@ class GitHubConnector(BaseConnector):
                 }
                 explicit[c["login"]] = {"id": str(c["id"]), "flags": flags}
 
-            for login, user_numeric_id in all_members.items():
+            combined_logins = set(all_members.keys()) | set(explicit.keys())
+            for login in combined_logins:
                 if login in explicit:
-                    entry = explicit[login]
+                    entry  = explicit[login]
                     flags  = entry["flags"]
                     source = "explicit"
                     uid    = entry["id"]
                 else:
                     flags  = self._flags_from_default(default_perm)
                     source = "org_default"
-                    uid    = user_numeric_id
+                    uid    = all_members[login]
 
                 role = self._role_from_flags(flags)
                 permissions.append(self.normalize_data(

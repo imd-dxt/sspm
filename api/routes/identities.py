@@ -128,6 +128,38 @@ def _get_risky_resources(
     return {row[0] for row in fq.distinct().all()}
 
 
+def _synthesize_users_from_perms(
+    perms: list[NormalizedEntity],
+    perm_admin_ids: set[str],
+    user_resource_ids: dict[str, set[str]],
+    user_resources: dict[str, list[dict]],
+    finding_counts: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Build synthetic user rows from permission grantees when no user entities exist."""
+    seen: dict[str, dict] = {}
+    for p in perms:
+        d = p.data_json or {}
+        grantee = d.get("grantee_id") or d.get("subject_id", "")
+        login = d.get("grantee_login") or grantee
+        if not grantee or grantee in seen:
+            continue
+        fc = _user_finding_count(grantee, str(login), None, user_resource_ids, finding_counts)
+        seen[grantee] = {
+            "id": None,
+            "platform_id": grantee,
+            "username": login,
+            "display_name": login,
+            "email": None,
+            "is_active": True,
+            "is_external": False,
+            "is_admin": grantee in perm_admin_ids,
+            "finding_count": fc,
+            "resource_count": len(user_resources.get(grantee, [])),
+            "resources": user_resources.get(grantee, [])[:6],
+        }
+    return list(seen.values())
+
+
 def _build_user_resource_maps(
     perms: list[NormalizedEntity],
 ) -> tuple[set[str], dict[str, set[str]], dict[str, list[dict]]]:
@@ -246,9 +278,22 @@ def get_identity_summary(
     risky_resources = _get_risky_resources(db, platform, connector_id)
     at_risk_users = _compute_at_risk_users(users, user_resource_ids, risky_resources)
 
+    # When no user entities exist, count unique grantees from permissions as fallback
+    if not users:
+        unique_grantees = {
+            (p.data_json or {}).get("grantee_id") or (p.data_json or {}).get("subject_id", "")
+            for p in perms
+            if (p.data_json or {}).get("grantee_id") or (p.data_json or {}).get("subject_id")
+        }
+        total_users = len(unique_grantees)
+        total_admins = len(perm_admin_ids)
+    else:
+        total_users = len(users)
+        total_admins = len(direct_admin_ids | perm_admin_ids)
+
     return {
-        "total_users": len(users),
-        "total_admins": len(direct_admin_ids | perm_admin_ids),
+        "total_users": total_users,
+        "total_admins": total_admins,
         "users_at_risk": len(at_risk_users),
         "total_resources": resource_count,
     }
@@ -287,27 +332,32 @@ def list_identity_users(
         fq = fq.filter(Finding.connector_id == connector_id)
     finding_counts: dict[str, int] = dict(fq.group_by(Finding.resource_identifier).all())
 
-    result = []
-    for u in users:
-        d = u.data_json or {}
-        pid = u.platform_id
-        username = d.get("username", pid)
-        fc = _user_finding_count(pid, username, u.email, user_resource_ids, finding_counts)
-        is_admin = _is_admin_entity(u) or pid in perm_admin_ids
+    if not users:
+        result = _synthesize_users_from_perms(
+            perms, perm_admin_ids, user_resource_ids, user_resources, finding_counts
+        )
+    else:
+        result = []
+        for u in users:
+            d = u.data_json or {}
+            pid = u.platform_id
+            username = d.get("username", pid)
+            fc = _user_finding_count(pid, username, u.email, user_resource_ids, finding_counts)
+            is_admin = _is_admin_entity(u) or pid in perm_admin_ids
 
-        result.append({
-            "id": u.id,
-            "platform_id": pid,
-            "username": username,
-            "display_name": d.get("display_name") or username,
-            "email": u.email,
-            "is_active": d.get("is_active", True),
-            "is_external": d.get("is_external", False),
-            "is_admin": is_admin,
-            "finding_count": fc,
-            "resource_count": len(user_resources.get(pid, [])),
-            "resources": user_resources.get(pid, [])[:6],
-        })
+            result.append({
+                "id": u.id,
+                "platform_id": pid,
+                "username": username,
+                "display_name": d.get("display_name") or username,
+                "email": u.email,
+                "is_active": d.get("is_active", True),
+                "is_external": d.get("is_external", False),
+                "is_admin": is_admin,
+                "finding_count": fc,
+                "resource_count": len(user_resources.get(pid, [])),
+                "resources": user_resources.get(pid, [])[:6],
+            })
 
     result.sort(key=lambda x: (-x["finding_count"], -int(x["is_admin"]), x["username"]))
     return result[offset: offset + limit]

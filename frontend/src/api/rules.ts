@@ -17,3 +17,12 @@ export function useScanRuns(): UseQueryResult<ScanRun[]> {
     refetchInterval: 30_000,
   })
 }
+
+export function useScanRunsByConnector(connectorId: string): UseQueryResult<ScanRun[]> {
+  return useQuery({
+    queryKey: ['scan-runs', connectorId],
+    queryFn: () => get<ScanRun[]>(`/scan_runs/?connector_id=${connectorId}`),
+    enabled: !!connectorId,
+    refetchInterval: 30_000,
+  })
+}
