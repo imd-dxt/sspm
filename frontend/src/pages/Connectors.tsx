@@ -81,7 +81,7 @@ export default function Connectors() {
       )}
 
       {isLoading && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 300px))', gap: 16 }}>
           {CARD_SKELETONS.map((id, i) => (
             <div
               key={id}
@@ -108,7 +108,7 @@ export default function Connectors() {
       )}
 
       {!isLoading && !isError && total > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 300px))', gap: 16 }}>
           {connectors!.map((c) => (
             <ConnectorPostureCard key={c.id} connector={c} />
           ))}

@@ -109,9 +109,9 @@ export default function ConnectorPostureCard({ connector }: Readonly<{ connector
       {/* Radial chart */}
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
         <RadialBarChart
-          width={200} height={200}
+          width={160} height={160}
           startAngle={0} endAngle={scoreAngle}
-          innerRadius={68} outerRadius={90}
+          innerRadius={52} outerRadius={70}
           data={chartData}
         >
           <PolarGrid gridType="circle" radialLines={false} stroke="none" polarRadius={[90, 68]} />
@@ -192,12 +192,12 @@ export default function ConnectorPostureCard({ connector }: Readonly<{ connector
         ) : (
           <>
             {/* Sync + schedule split button */}
-            <div ref={scheduleRef} style={{ position: 'relative', display: 'inline-flex', flex: 1 }}>
+            <div ref={scheduleRef} style={{ position: 'relative', display: 'inline-flex' }}>
               <button
                 onClick={handleSync}
                 disabled={sync.isPending}
                 className="btn-sm"
-                style={{ flex: 1, borderRadius: '8px 0 0 8px', borderRight: 'none', paddingRight: 8, justifyContent: 'center' }}
+                style={{ borderRadius: '8px 0 0 8px', borderRight: 'none', paddingLeft: 10, paddingRight: 10 }}
               >
                 {sync.isPending
                   ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} />
@@ -253,14 +253,16 @@ export default function ConnectorPostureCard({ connector }: Readonly<{ connector
               )}
             </div>
 
-            <button onClick={handleTest} disabled={test.isPending} className="btn-sm" title="Test connection">
+            {/* spacer pushes icon buttons to the right */}
+            <div style={{ flex: 1 }} />
+
+            <button onClick={handleTest} disabled={test.isPending} className="btn-sm" title="Test connection" style={{ padding: '6px 9px' }}>
               {test.isPending ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Zap size={13} />}
-              Test
             </button>
-            <button onClick={() => navigate(`/connectors/${connector.id}`)} className="btn-sm" title="Scan history" style={{ padding: '6px 8px' }}>
+            <button onClick={() => navigate(`/connectors/${connector.id}`)} className="btn-sm" title="Scan history" style={{ padding: '6px 9px' }}>
               <History size={13} />
             </button>
-            <button onClick={() => setConfirmDelete(true)} className="btn-sm" title="Delete" style={{ padding: '6px 8px' }}>
+            <button onClick={() => setConfirmDelete(true)} className="btn-sm" title="Delete" style={{ padding: '6px 9px' }}>
               <Trash2 size={13} />
             </button>
           </>

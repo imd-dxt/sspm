@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ShieldCheck, ChevronDown, ChevronRight, CheckCircle2, XCircle, HelpCircle, AlertTriangle } from 'lucide-react'
+import { ShieldCheck, ChevronDown, ChevronRight, CheckCircle2, XCircle, HelpCircle, AlertTriangle, RefreshCw } from 'lucide-react'
 import { useComplianceReport, type ComplianceStandard, type ComplianceControl } from '../api/compliance'
 import { formatRelative } from '../lib/utils'
 
@@ -223,7 +223,7 @@ function OverallSummary({ score, standards }: Readonly<{ score: number; standard
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function Compliance() {
-  const { data, isLoading, error } = useComplianceReport()
+  const { data, isLoading, error, refetch } = useComplianceReport()
 
   if (isLoading) {
     return (
@@ -250,11 +250,15 @@ export default function Compliance() {
         <div className="page-header">
           <h2 style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'var(--text)' }}>Compliance Reports</h2>
         </div>
-        <div className="card" style={{ padding: 32, textAlign: 'center' }}>
-          <ShieldCheck size={32} style={{ color: 'var(--text-muted)', margin: '0 auto 12px' }} />
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-            Unable to load compliance data. Check that rules are loaded and connectors have synced.
+        <div className="card" style={{ padding: 40, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+          <ShieldCheck size={36} style={{ color: 'var(--text-muted)' }} />
+          <p style={{ fontWeight: 600, fontSize: '0.9375rem', color: 'var(--text)' }}>Could not load compliance data</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.8125rem', maxWidth: 380 }}>
+            {error instanceof Error ? error.message : 'The compliance API is unavailable. Make sure the backend is running and has been restarted after the latest deploy.'}
           </p>
+          <button onClick={() => refetch()} className="btn-ghost" style={{ marginTop: 4 }}>
+            <RefreshCw size={14} /> Retry
+          </button>
         </div>
       </div>
     )
