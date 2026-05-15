@@ -104,11 +104,25 @@ class ComplianceReport(BaseModel):
 def get_compliance_report(db: DB) -> ComplianceReport:
     # Map control_id → list[rule_id]
     control_to_rules: dict[str, list[str]] = {}
-    rules = db.query(Rule).filter(Rule.is_active == True).all()  # noqa: E712
+    try:
+        active_rules = db.query(Rule).filter(Rule.is_active.is_(True)).all()
+    except Exception as exc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"rules query failed: {exc}") from exc
 
-    for rule in rules:
-        for control in rule.compliance_mapping or []:
-            control_to_rules.setdefault(control, []).append(rule.id)
+    for rule in active_rules:
+        mappings = rule.compliance_mapping
+        if not mappings:
+            continue
+        if isinstance(mappings, str):
+            import json
+            try:
+                mappings = json.loads(mappings)
+            except Exception:
+                continue
+        for control in mappings:
+            if isinstance(control, str):
+                control_to_rules.setdefault(control, []).append(rule.id)
 
     standards_out: list[ComplianceStandard] = []
 
