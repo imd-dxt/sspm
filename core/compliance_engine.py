@@ -62,6 +62,12 @@ class ComplianceEngine:
         if total == 0:
             return _empty(platform, framework)
 
+        # The findings table only stores violations.
+        # total_count==0 on a scanned platform → no violations → rule passes.
+        platform_scanned = (
+            db.query(Finding).filter(Finding.platform == platform).limit(1).count() > 0
+        )
+
         passed = 0
         failed = 0
         for rule in mapped:
@@ -71,7 +77,9 @@ class ComplianceEngine:
                 .count()
             )
             if total_count == 0:
-                continue  # not_applicable — no findings for this rule yet
+                if platform_scanned:
+                    passed += 1   # scanned but no violations → compliant
+                continue
             open_count = (
                 db.query(Finding)
                 .filter(Finding.rule_id == rule.id, Finding.platform == platform, Finding.status == "open")

@@ -151,19 +151,26 @@ class FixResponse(BaseModel):
 
 # ── Control building helpers ──────────────────────────────────────────────────
 
-def _control_status(open_count: int, total_count: int) -> str:
-    if total_count == 0:
-        return "not_applicable"
-    if open_count == 0:
-        return "pass"
-    return "fail"
+def _control_status(open_count: int, total_count: int, platform_scanned: bool) -> str:
+    """
+    Determine control status.
+
+    The findings table only stores violations — it never stores a "no violation found" record.
+    So total_count==0 means either:
+      (a) the platform was scanned and the rule found zero violations → PASS
+      (b) the platform has never been scanned → NOT APPLICABLE
+
+    We distinguish (a) vs (b) by checking whether any findings exist for the rule's platform.
+    """
+    if total_count > 0:
+        return "pass" if open_count == 0 else "fail"
+    return "pass" if platform_scanned else "not_applicable"
 
 
 def _compute_score(controls: list[ComplianceControl]) -> int:
     passing = sum(1 for c in controls if c.status == "pass")
     failing = sum(1 for c in controls if c.status == "fail")
     covered = passing + failing
-    # When no findings exist yet, no violations detected → treat as 100%
     return round((passing / covered) * 100) if covered > 0 else 100
 
 
@@ -184,6 +191,17 @@ def _build_control_report(db: Session) -> OverallReport:
         active_rules = db.query(Rule).filter(Rule.is_active.is_(True)).all()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"rules query failed: {exc}") from exc
+
+    # Platforms that have been scanned (have at least one finding)
+    try:
+        scanned_platforms: set[str] = {
+            row[0] for row in db.query(distinct(Finding.platform)).all()
+        }
+    except Exception:
+        scanned_platforms = set()
+
+    # Build a lookup: rule_id → platform (for scanned-platform checks)
+    rule_platform: dict[str, str] = {r.id: r.platform for r in active_rules}
 
     # Map control → rule IDs for SOC2 / ISO27001 / NIST-CSF (via compliance_mapping)
     mapping_controls: dict[str, list[str]] = {}
@@ -214,7 +232,11 @@ def _build_control_report(db: Session) -> OverallReport:
                 Finding.rule_id.in_(rule_ids), Finding.status == "open"
             ).count()
             total_count = db.query(Finding).filter(Finding.rule_id.in_(rule_ids)).count()
-            status = _control_status(open_count, total_count)
+
+            # A control is "scanned" if any of its rules run on a platform that has findings
+            ctrl_platforms = {rule_platform.get(rid, "") for rid in rule_ids}
+            platform_scanned = bool(ctrl_platforms & scanned_platforms)
+            status = _control_status(open_count, total_count, platform_scanned)
 
             # For CIS, use rule name as control name if not in registry
             name = _CONTROL_NAMES.get(ctrl_id)
@@ -443,69 +465,140 @@ async def get_ai_fix(finding_id: int, db: DB) -> FixResponse:
         return FixResponse(finding_id=finding_id, suggestion=static, source="static")
 
 
-# ── PDF builder ───────────────────────────────────────────────────────────────
+# ── PDF builder (pure Python, zero external dependencies) ────────────────────
 
-def _build_pdf(report: DbReport) -> bytes:
-    try:
-        from fpdf import FPDF  # type: ignore[import]
-    except ImportError:
-        raise HTTPException(status_code=500, detail="PDF library not installed. Run: pip install fpdf2")
-
-    fw_name = FRAMEWORKS.get(report.framework, {}).get("name", report.framework)
-    score_color = (34, 197, 94) if report.score >= 75 else (234, 179, 8) if report.score >= 50 else (239, 68, 68)
-
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-
-    # Header
-    pdf.set_fill_color(17, 24, 39)
-    pdf.rect(0, 0, 210, 32, "F")
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.set_text_color(255, 255, 255)
-    pdf.set_xy(14, 10)
-    pdf.cell(0, 8, "SSPM Compliance Report", ln=True)
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_xy(14, 20)
-    pdf.cell(0, 6, f"{fw_name}  |  Platform: {report.platform}  |  Generated: {report.created_at.strftime('%Y-%m-%d %H:%M UTC')}")
-
-    # Score section
-    pdf.set_xy(14, 40)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Compliance Score", ln=True)
-
-    pdf.set_font("Helvetica", "B", 36)
-    pdf.set_text_color(*score_color)
-    pdf.set_xy(14, 50)
-    pdf.cell(50, 16, f"{report.score}%", ln=False)
-
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(100, 100, 100)
-    pdf.set_xy(70, 54)
-    pdf.multi_cell(0, 5,
-        f"Total rules: {report.total_rules}\n"
-        f"Passing:     {report.passed_rules}\n"
-        f"Failing:     {report.failed_rules}"
+def _pdf_esc(s: str) -> str:
+    """Escape a string for use inside PDF parenthesised literal strings."""
+    return (
+        s.replace("\\", "\\\\")
+         .replace("(", "\\(")
+         .replace(")", "\\)")
+         .replace("\r", " ")
+         .replace("\n", " ")
     )
 
+
+def _build_pdf(report: DbReport) -> bytes:
+    """
+    Generate a valid PDF/1.4 file using only the Python standard library.
+    Uses Helvetica (a built-in PDF Type1 font) so no font embedding is needed.
+    Coordinate origin is bottom-left; page size is US Letter (612 × 792 pt).
+    """
+    import textwrap
+
+    fw_name = FRAMEWORKS.get(report.framework, {}).get("name", report.framework)
+    created = report.created_at.strftime("%Y-%m-%d %H:%M UTC")
+    e = _pdf_esc
+
+    # ── Content stream operations ─────────────────────────────────────────────
+    # rg = non-stroking (fill) color (RGB 0-1), RG = stroking color
+    # BT…ET = text block, /Fx sz Tf = select font, 1 0 0 1 x y Tm = text matrix
+    # (text) Tj = show string, x y w h re f = filled rectangle, m l S = line stroke
+    def rgb(r: float, g: float, b: float) -> str:
+        return f"{r:.3f} {g:.3f} {b:.3f}"
+
+    def t(x: int, y: int, size: float, text: str, bold: bool = False) -> str:
+        font = "/Fb" if bold else "/F1"
+        return f"BT {font} {size} Tf 1 0 0 1 {x} {y} Tm ({e(text)}) Tj ET"
+
+    ops: list[str] = []
+
+    # Dark header band (y=750 to y=792, full width)
+    ops.append(f"{rgb(0.09, 0.11, 0.17)} rg  0 750 612 42 re f")
+    ops.append(f"{rgb(1,1,1)} rg")
+    ops.append(t(20, 768, 15, "SSPM Compliance Report", bold=True))
+    ops.append(t(20, 754, 9,  f"{fw_name}  |  Platform: {report.platform}  |  {created}"))
+
+    # Score (large, coloured)
+    sr, sg, sb = (
+        (0.13, 0.77, 0.37) if report.score >= 75 else
+        (0.92, 0.70, 0.03) if report.score >= 50 else
+        (0.94, 0.27, 0.27)
+    )
+    ops.append(f"{rgb(sr, sg, sb)} rg")
+    ops.append(t(20, 695, 42, f"{report.score}%", bold=True))
+
+    # Stats alongside score
+    ops.append(f"{rgb(0.2, 0.2, 0.2)} rg")
+    ops.append(t(130, 715, 10, f"Total Rules:  {report.total_rules}"))
+    ops.append(t(130, 701, 10, f"Passing:      {report.passed_rules}"))
+    ops.append(t(130, 687, 10, f"Failing:      {report.failed_rules}"))
+
+    # Divider line
+    ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 672 m 592 672 l S")
+
     # AI narrative
+    y = 654
     if report.ai_narrative:
-        pdf.set_xy(14, 80)
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, "Executive Summary", ln=True)
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(50, 50, 50)
-        pdf.multi_cell(182, 5, report.ai_narrative)
+        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
+        ops.append(t(20, y, 12, "Executive Summary", bold=True))
+        y -= 18
+        ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+        for para in report.ai_narrative.split("\n"):
+            if not para.strip():
+                y -= 6
+                continue
+            for wline in textwrap.wrap(para.strip(), width=92):
+                if y < 40:
+                    break
+                ops.append(t(20, y, 9.5, wline))
+                y -= 13
+            y -= 4
 
     # Footer
-    pdf.set_xy(14, -20)
-    pdf.set_font("Helvetica", "I", 8)
-    pdf.set_text_color(150, 150, 150)
-    pdf.cell(0, 5, f"Generated by SSPM  |  {fw_name}  |  {report.platform}", align="C")
+    ops.append(f"{rgb(0.6, 0.6, 0.6)} rg")
+    ops.append(t(20, 18, 8, f"Generated by SSPM  |  {fw_name}  |  {report.platform}  |  Report #{report.id}"))
 
-    return bytes(pdf.output())
+    # ── Assemble PDF objects ──────────────────────────────────────────────────
+    stream = "\n".join(ops).encode("latin-1", errors="replace")
+
+    def obj(n: int, hdr: str, data: bytes | None = None) -> bytes:
+        if data is not None:
+            return f"{n} 0 obj\n{hdr}\nstream\n".encode() + data + b"\nendstream\nendobj\n"
+        return f"{n} 0 obj\n{hdr}\nendobj\n".encode()
+
+    # Object 1 – Catalog
+    o1 = obj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+    # Object 2 – Pages
+    o2 = obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+    # Object 3 – Page (with two fonts: /F1 regular, /Fb bold)
+    o3 = obj(3, (
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        "/Resources << /Font << "
+        "/F1 5 0 R "
+        "/Fb 6 0 R "
+        ">> >> >>"
+    ))
+    # Object 4 – Content stream
+    o4 = obj(4, f"<< /Length {len(stream)} >>", stream)
+    # Object 5 – Helvetica regular
+    o5 = obj(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    # Object 6 – Helvetica bold
+    o6 = obj(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
+
+    # ── Cross-reference table ─────────────────────────────────────────────────
+    header = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"  # binary-safe marker
+    chunks = [o1, o2, o3, o4, o5, o6]
+    offsets: list[int] = []
+    pos = len(header)
+    for chunk in chunks:
+        offsets.append(pos)
+        pos += len(chunk)
+
+    body = header + b"".join(chunks)
+    xref_pos = len(body)
+
+    # Each xref entry must be exactly 20 bytes: NNNNNNNNNN GGGGG F \n
+    xref = b"xref\n0 7\n0000000000 65535 f \n"
+    for off in offsets:
+        xref += f"{off:010d} 00000 n \n".encode()
+
+    trailer = (
+        f"trailer\n<< /Size 7 /Root 1 0 R >>\n"
+        f"startxref\n{xref_pos}\n%%EOF\n"
+    ).encode()
+
+    return body + xref + trailer
 
 
 # ── Static fallback answers ───────────────────────────────────────────────────
