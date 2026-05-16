@@ -20,7 +20,7 @@ export interface ComplianceStandard {
   total_controls: number
   passing_controls: number
   failing_controls: number
-  unknown_controls: number
+  not_applicable_controls: number
   controls: ComplianceControl[]
 }
 

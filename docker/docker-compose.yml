@@ -107,6 +107,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ollama:
+        condition: service_started
     environment:
       # Construct internal URL so the container reaches the postgres service,
       # not localhost. This overrides whatever POSTGRES_URL is in .env.
@@ -118,6 +120,9 @@ services:
       ENCRYPTION_KEY:  ${ENCRYPTION_KEY}
       LOG_LEVEL:       ${LOG_LEVEL:-INFO}
       LOG_FORMAT:      ${LOG_FORMAT:-json}
+      OLLAMA_URL:      http://ollama:11434
+      OLLAMA_MODEL:    ${OLLAMA_MODEL:-llama3.2}
+      OLLAMA_TIMEOUT:  ${OLLAMA_TIMEOUT:-120}
     ports:
       - "8000:8000"
     networks:

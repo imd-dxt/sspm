@@ -45,8 +45,8 @@ function FrameworkCard({ standard }: Readonly<{ standard: ComplianceStandard }>)
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
             <Stat icon={<CheckCircle2 size={12} style={{ color: 'var(--ok)' }} />} value={standard.passing_controls} label="passing" />
             <Stat icon={<XCircle size={12} style={{ color: 'var(--sev-critical)' }} />} value={standard.failing_controls} label="failing" />
-            {standard.unknown_controls > 0 && (
-              <Stat icon={<HelpCircle size={12} style={{ color: 'var(--text-muted)' }} />} value={standard.unknown_controls} label="unknown" />
+            {standard.not_applicable_controls > 0 && (
+              <Stat icon={<HelpCircle size={12} style={{ color: 'var(--text-muted)' }} />} value={standard.not_applicable_controls} label="N/A" />
             )}
           </div>
         )}
@@ -228,7 +228,7 @@ function FrameworksTab() {
               {[
                 { label: 'Pass', value: current.passing_controls, color: 'var(--ok)' },
                 { label: 'Fail', value: current.failing_controls, color: 'var(--sev-critical)' },
-                { label: 'Unknown', value: current.unknown_controls, color: 'var(--text-muted)' },
+                { label: 'N/A', value: current.not_applicable_controls, color: 'var(--text-muted)' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{ textAlign: 'center' }}>
                   <p style={{ fontSize: '1rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums' }}>{value}</p>

@@ -43,6 +43,9 @@ respx==0.21.1             # mock httpx requests
 langchain-openai==0.1.8
 langchain-core==0.2.10
 
+# PDF generation
+fpdf2==2.7.9
+
 # Dev tools
 black==24.4.2
 ruff==0.4.4

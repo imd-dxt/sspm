@@ -4,6 +4,8 @@ import { useGenerateReport, useComplianceReports, type StoredReport } from '../.
 import { useQueryClient } from '@tanstack/react-query'
 import { formatRelative } from '../../lib/utils'
 
+const PDF_BASE = '/api/v1'
+
 const PLATFORMS = ['github', 'entra', 'jira', 'slack']
 const FRAMEWORKS = ['CIS', 'SOC2', 'ISO27001', 'NIST-CSF']
 
@@ -113,33 +115,39 @@ function ReportRow({ report }: Readonly<{ report: StoredReport }>) {
   const [expanded, setExpanded] = useState(false)
   const score = report.score
   const color = score >= 75 ? 'var(--ok)' : score >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
+  const pdfUrl = `${PDF_BASE}/compliance/reports/${report.id}/pdf`
 
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div
-        style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer' }}
-        onClick={() => setExpanded((e) => !e)}
-      >
+      <div style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <span style={{ fontSize: '1rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', minWidth: 48 }}>
           {score}%
         </span>
-        <div style={{ flex: 1 }}>
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+        >
           <span style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text)' }}>
             {report.platform} · {report.framework}
           </span>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 10 }}>
             {formatRelative(report.created_at)}
           </span>
-        </div>
-        <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
+        </button>
+        <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', flexShrink: 0 }}>
           {report.passed_rules}/{report.total_rules} rules
         </span>
-        {report.ai_narrative && (
-          <Download size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-        )}
+        <a
+          href={pdfUrl}
+          download
+          title="Download PDF"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: 'var(--accent)', textDecoration: 'none', flexShrink: 0 }}
+        >
+          <Download size={13} /> PDF
+        </a>
       </div>
       {expanded && report.ai_narrative && (
-        <div style={{ padding: '0 20px 16px', fontSize: '0.8125rem', color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+        <div style={{ padding: '12px 20px 16px', fontSize: '0.8125rem', color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap', borderTop: '1px solid var(--border)' }}>
           {report.ai_narrative}
         </div>
       )}

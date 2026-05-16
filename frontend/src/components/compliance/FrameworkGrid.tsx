@@ -7,17 +7,10 @@ interface FrameworkGridProps {
 
 function StatusCell({ status }: Readonly<{ status: string }>) {
   if (status === 'pass')
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <CheckCircle2 size={15} style={{ color: 'var(--ok)' }} />
-      </div>
-    )
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CheckCircle2 size={15} style={{ color: 'var(--ok)' }} /></div>
   if (status === 'fail')
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <XCircle size={15} style={{ color: 'var(--sev-critical)' }} />
-      </div>
-    )
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}><XCircle size={15} style={{ color: 'var(--sev-critical)' }} /></div>
+  // not_applicable
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <HelpCircle size={15} style={{ color: 'var(--text-muted)' }} />

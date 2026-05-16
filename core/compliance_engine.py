@@ -46,13 +46,18 @@ class ComplianceEngine:
         if not meta:
             return _empty(platform, framework)
 
-        prefix = meta["prefix"]
         rules = db.query(Rule).filter(
             Rule.platform == platform,
             Rule.is_active.is_(True),
         ).all()
 
-        mapped = [r for r in rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
+        if framework == "CIS":
+            # CIS rules are identified by their ID prefix, not compliance_mapping
+            mapped = [r for r in rules if r.id.startswith("CIS-")]
+        else:
+            prefix = meta["prefix"]
+            mapped = [r for r in rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
+
         total = len(mapped)
         if total == 0:
             return _empty(platform, framework)
@@ -60,13 +65,16 @@ class ComplianceEngine:
         passed = 0
         failed = 0
         for rule in mapped:
+            total_count = (
+                db.query(Finding)
+                .filter(Finding.rule_id == rule.id, Finding.platform == platform)
+                .count()
+            )
+            if total_count == 0:
+                continue  # not_applicable — no findings for this rule yet
             open_count = (
                 db.query(Finding)
-                .filter(
-                    Finding.rule_id == rule.id,
-                    Finding.platform == platform,
-                    Finding.status == "open",
-                )
+                .filter(Finding.rule_id == rule.id, Finding.platform == platform, Finding.status == "open")
                 .count()
             )
             if open_count == 0:
@@ -74,7 +82,8 @@ class ComplianceEngine:
             else:
                 failed += 1
 
-        score = round((passed / total) * 100)
+        covered = passed + failed
+        score = round((passed / covered) * 100) if covered > 0 else 100
         return {
             "platform": platform,
             "framework": framework,
