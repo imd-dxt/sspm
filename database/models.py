@@ -180,6 +180,41 @@ class Finding(Base):
     rule: Mapped["Rule"] = relationship("Rule", back_populates="findings")
 
 
+# ── ComplianceSnapshot ────────────────────────────────────────────────────────
+
+class ComplianceSnapshot(Base):
+    """Point-in-time compliance score per platform × framework, taken after each sync."""
+    __tablename__ = "compliance_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    framework: Mapped[str] = mapped_column(String(64), nullable=False, index=True)  # CIS | SOC2 | ISO27001 | NIST-CSF
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    passed_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    snapshot_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# ── ComplianceReport ──────────────────────────────────────────────────────────
+
+class ComplianceReport(Base):
+    """Generated compliance report with optional AI narrative."""
+    __tablename__ = "compliance_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String(64), nullable=False)
+    framework: Mapped[str] = mapped_column(String(64), nullable=False)
+    score: Mapped[int] = mapped_column(Integer, nullable=False)
+    total_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    passed_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ai_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 # ── ActivityLog ───────────────────────────────────────────────────────────────
 
 class ActivityLog(Base):
