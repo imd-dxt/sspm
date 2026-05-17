@@ -130,7 +130,7 @@ jobs:
             # depends_on (postgres healthy) is respected — no --no-deps.
             # Migrations run inside the container CMD (alembic upgrade head &&
             # uvicorn ...) after depends_on conditions are satisfied.
-            docker compose --project-directory . -f docker/docker-compose.yml up -d api frontend
+            docker compose --project-directory . -f docker/docker-compose.yml up -d --force-recreate api frontend
 
             # Remove dangling images to reclaim disk space
             docker image prune -f
