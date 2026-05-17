@@ -37,7 +37,15 @@ def _parse_mappings(raw: Any) -> list[str]:
             raw = json.loads(raw)
         except Exception:
             return []
-    return [m for m in raw if isinstance(m, str)]
+    result: list[str] = []
+    for m in raw:
+        if isinstance(m, str):
+            result.append(m)
+        elif isinstance(m, dict):
+            # YAML dict-style: {'SOC2-TSC': 'CC6.1'} -> 'SOC2-TSC:CC6.1'
+            for k, v in m.items():
+                result.append(f"{k}:{v}")
+    return result
 
 
 class ComplianceEngine:
@@ -47,7 +55,7 @@ class ComplianceEngine:
             return _empty(platform, framework)
 
         rules = db.query(Rule).filter(
-            Rule.platform == platform,
+            Rule.platform.in_([platform, "cross-platform"]),
             Rule.is_active.is_(True),
         ).all()
 
@@ -105,7 +113,10 @@ class ComplianceEngine:
     def snapshot_all(self, db: Session) -> None:
         """Persist a ComplianceSnapshot for every platform × framework with mapped rules."""
         try:
-            platforms = [row[0] for row in db.query(distinct(Rule.platform)).all()]
+            from database.models import Connector
+            rule_platforms = {row[0] for row in db.query(distinct(Rule.platform)).all() if row[0] != "cross-platform"}
+            connector_platforms = {row[0] for row in db.query(distinct(Connector.platform_name)).all()}
+            platforms = list(rule_platforms | connector_platforms)
         except Exception as exc:
             log.warning("compliance_snapshot: failed to fetch platforms: %s", exc)
             return

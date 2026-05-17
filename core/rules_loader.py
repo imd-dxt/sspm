@@ -1163,3 +1163,8 @@ class RulesLoader:
         """Load entraid_security_rules.yaml from base_dir."""
         yaml_path = str(Path(base_dir) / "entraid_security_rules.yaml")
         return self.load_from_yaml(yaml_path)
+
+    def load_all_soc2_rules(self, base_dir: str = ".") -> dict[str, Any]:
+        """Load soc2_security_rules.yaml from base_dir."""
+        yaml_path = str(Path(base_dir) / "soc2_security_rules.yaml")
+        return self.load_from_yaml(yaml_path)

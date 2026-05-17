@@ -454,7 +454,7 @@ def list_identity_resources(
         )
         .all()
     )
-    entities = [e for e in all_entities if not _is_org_entity(e) and not _is_role_entity(e)]
+    entities = [e for e in all_entities if not _is_org_entity(e)]
 
     finding_counts = _fetch_finding_counts(db, platform, connector_id)
     sev_counts     = _fetch_sev_counts(db, platform, connector_id)

@@ -29,6 +29,7 @@ const DEFAULT_TABS: TabDef[] = [
   { id: 'users',  label: 'Users',               icon: <Users size={14} /> },
   { id: 'groups', label: 'Groups / Teams',       icon: <Grid3x3 size={14} /> },
   { id: 'roles',  label: 'Roles & Permissions',  icon: <Shield size={14} /> },
+  { id: 'repos',  label: 'Projects & Resources', icon: <FolderOpen size={14} /> },
   { id: 'map',    label: 'Access Map',           icon: <Map size={14} /> },
 ]
 
@@ -554,10 +555,16 @@ export default function IdentityDetail() {
     () => (resourcesData ?? []).filter((r) => r.resource_type === 'repository' || r.resource_type === 'repo').length,
     [resourcesData],
   )
+  const projectCount = useMemo(
+    () => (resourcesData ?? []).filter(
+      (r) => !GROUP_TYPES.has(r.resource_type ?? '') && !ROLE_TYPES.has(r.resource_type ?? ''),
+    ).length,
+    [resourcesData],
+  )
 
   const tabCounts: Partial<Record<Tab, number>> = platform === 'github'
     ? { users: usersData?.length, repos: repoCount || undefined }
-    : { users: usersData?.length, groups: groupCount || undefined, roles: roleCount || undefined }
+    : { users: usersData?.length, groups: groupCount || undefined, roles: roleCount || undefined, repos: projectCount || undefined }
 
   const kpi = summary ?? {
     total_users: 0,

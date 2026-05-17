@@ -9,7 +9,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import type { Finding } from '../../api/types'
-import { useUpdateFindingStatus, useRemediateFinding } from '../../api/findings'
+import { useUpdateFindingStatus, useRemediateFinding, useCiaImpact, type CiaImpact } from '../../api/findings'
 import SeverityBadge from './SeverityBadge'
 import {
   formatRelative,
@@ -43,10 +43,12 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
   const [showStatusModal, setShowStatusModal] = useState(false)
   const [newStatus, setNewStatus] = useState<FindingStatus>('open')
   const [justification, setJustification] = useState('')
+  const [ciaResult, setCiaResult] = useState<CiaImpact | null>(null)
   const drawerRef = useRef<HTMLDivElement>(null)
 
   const updateStatus = useUpdateFindingStatus()
   const remediate = useRemediateFinding()
+  const ciaImpact = useCiaImpact()
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -62,6 +64,7 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
   useEffect(() => {
     if (finding) {
       document.body.style.overflow = 'hidden'
+      setCiaResult(null)
     } else {
       document.body.style.overflow = ''
     }
@@ -218,6 +221,64 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
               <p style={{ fontSize: '0.875rem', color: 'var(--text)' }}>{finding.impact_explanation}</p>
             </section>
           )}
+
+          {/* CIA Triad Impact */}
+          <section>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <p className="label" style={{ marginBottom: 0 }}>
+                CIA Triad Impact
+                {ciaResult?.source === 'ollama' && (
+                  <span style={{ fontWeight: 400, color: 'var(--accent)', marginLeft: 6, textTransform: 'none', fontSize: '0.6875rem' }}>
+                    ✦ AI-generated
+                  </span>
+                )}
+              </p>
+              {!ciaResult && (
+                <button
+                  onClick={() => {
+                    if (!finding) return
+                    ciaImpact.mutate(finding.id, { onSuccess: (data) => setCiaResult(data) })
+                  }}
+                  disabled={ciaImpact.isPending}
+                  className="btn-ghost"
+                  style={{ fontSize: '0.6875rem', padding: '3px 8px', gap: 4 }}
+                  title="Analyze CIA triad impact with Ollama"
+                >
+                  {ciaImpact.isPending
+                    ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
+                    : <span style={{ fontSize: 11 }}>✦</span>
+                  }
+                  {ciaImpact.isPending ? 'Analyzing…' : 'Analyze Impact'}
+                </button>
+              )}
+            </div>
+            {ciaResult ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {([
+                  { key: 'confidentiality', label: 'C', title: 'Confidentiality', color: '#6366f1' },
+                  { key: 'integrity',       label: 'I', title: 'Integrity',       color: '#f59e0b' },
+                  { key: 'availability',    label: 'A', title: 'Availability',    color: '#22c55e' },
+                ] as const).map(({ key, label, title, color }) => (
+                  <div key={key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <span style={{
+                      flexShrink: 0, width: 22, height: 22, borderRadius: 6, display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                      background: `color-mix(in oklch, ${color} 15%, transparent)`,
+                      color, fontSize: '0.6875rem', fontWeight: 700,
+                    }}>{label}</span>
+                    <div>
+                      <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 2 }}>{title}</p>
+                      <p style={{ fontSize: '0.8125rem', color: 'var(--text)' }}>{ciaResult[key]}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : !ciaImpact.isPending && (
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                Click "Analyze Impact" to get a CIA triad assessment from the AI.
+              </p>
+            )}
+          </section>
 
           {/* Remediation */}
           <section>

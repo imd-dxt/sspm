@@ -110,3 +110,17 @@ export function useRemediateFinding() {
     },
   })
 }
+
+export interface CiaImpact {
+  finding_id: number
+  source: 'ollama' | 'static'
+  confidentiality: string
+  integrity: string
+  availability: string
+}
+
+export function useCiaImpact() {
+  return useMutation({
+    mutationFn: (id: number) => post<CiaImpact>(`/findings/${id}/cia-impact`),
+  })
+}

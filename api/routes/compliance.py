@@ -282,7 +282,9 @@ def get_compliance_overview(db: DB) -> OverallReport:
 @router.get("/scores", response_model=list[PlatformScore])
 def get_all_scores(db: DB) -> list[PlatformScore]:
     try:
-        platforms = [row[0] for row in db.query(distinct(Rule.platform)).all()]
+        rule_platforms = {row[0] for row in db.query(distinct(Rule.platform)).all() if row[0] != "cross-platform"}
+        connector_platforms = {row[0] for row in db.query(distinct(Connector.platform_name)).all()}
+        platforms = list(rule_platforms | connector_platforms)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"DB error: {exc}") from exc
 
@@ -371,7 +373,7 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
                 for r in failing_rules_info[:5]
             ) or "None — all controls passing."
             prompt = (
-                f"You are a GRC (Governance, Risk, Compliance) expert. Write a concise 2-paragraph executive "
+                f"You are a GRC (Governance, Risk, Compliance) expert. Write a concise 3-paragraph executive "
                 f"summary for a {fw_name} compliance report.\n\n"
                 f"Platform: {req.platform} | Score: {result['score']}% | "
                 f"Passing: {result['passed_rules']}/{result['total_rules']} rules | "
@@ -379,7 +381,9 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
                 f"Top failing controls:\n{failing_ctx}\n\n"
                 f"Paragraph 1: Current {fw_name} posture and audit readiness. "
                 f"Paragraph 2: Priority remediation actions and GRC risk impact. "
-                f"Professional tone, under 120 words total, no bullet points."
+                f"Paragraph 3: CIA triad analysis — which of Confidentiality, Integrity, or Availability "
+                f"is most at risk from the top failing controls, and why in 1-2 sentences. "
+                f"Professional tone, under 160 words total, no bullet points."
             )
             narrative = await asyncio.wait_for(_generate(prompt), timeout=28.0)
         except (Exception, asyncio.TimeoutError) as exc:
@@ -672,6 +676,14 @@ def _professional_narrative(fw_name: str, platform: str, score: int, passed: int
             + (f" and {len(critical) - 1} other critical control(s)" if len(critical) > 1 else "")
             + ", requiring immediate attention."
         )
+    cia_note = (
+        "From a CIA triad perspective, Confidentiality and Integrity are the primary risk dimensions "
+        "given the access-control and authentication gaps identified. Availability risk is secondary "
+        "but should not be overlooked if privileged account controls are not addressed promptly."
+    ) if failed > 0 else (
+        "All monitored controls are passing. Confidentiality, Integrity, and Availability posture "
+        "is currently satisfactory under this framework."
+    )
     return (
         f"The {fw_name} compliance posture for {platform} is {posture}, with {passed} of {total} "
         f"controls passing ({score}%). The organisation is {audit} against this framework's requirements."
@@ -679,7 +691,8 @@ def _professional_narrative(fw_name: str, platform: str, score: int, passed: int
         f"The {failed} failing control(s) identified below represent the primary GRC risk exposure. "
         f"Prioritising critical and high-severity findings will yield the greatest improvement in audit "
         f"readiness and regulatory alignment. A structured remediation plan with clear ownership and "
-        f"defined timelines is recommended."
+        f"defined timelines is recommended.\n\n"
+        f"{cia_note}"
     )
 
 

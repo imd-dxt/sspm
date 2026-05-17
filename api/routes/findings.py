@@ -390,6 +390,88 @@ async def remediate_finding(finding_id: int, db: DB) -> dict[str, Any]:
     return _finding_to_dict(finding, db, include_evidence=False)
 
 
+@router.post(
+    "/{finding_id}/cia-impact",
+    responses={404: {"description": "Finding not found"}},
+)
+async def get_cia_impact(finding_id: int, db: DB) -> dict[str, Any]:
+    """
+    Analyze CIA triad impact (Confidentiality, Integrity, Availability) for a finding using Ollama.
+    Does not persist — returns analysis on demand.
+    """
+    import asyncio
+    import logging as _log
+
+    finding = _get_finding_or_404(finding_id, db)
+    rule = db.get(Rule, finding.rule_id)
+
+    rule_name = rule.name if rule else finding.rule_id
+    prompt = (
+        f"You are a cybersecurity expert. Analyze this security finding using the CIA triad "
+        f"(Confidentiality, Integrity, Availability).\n\n"
+        f"Finding: {rule_name}\n"
+        f"Platform: {finding.platform}\n"
+        f"Severity: {finding.severity}\n"
+        f"Category: {finding.category or 'General'}\n"
+        f"Description: {finding.description or ''}\n\n"
+        f"For each CIA dimension write exactly 1-2 sentences on the concrete risk:\n"
+        f"Confidentiality: how could this allow unauthorized access to or disclosure of sensitive data?\n"
+        f"Integrity: how could this allow unauthorized modification of data, settings, or code?\n"
+        f"Availability: how could this disrupt service continuity or system availability?\n\n"
+        f"Respond in this exact format:\n"
+        f"Confidentiality: <analysis>\n"
+        f"Integrity: <analysis>\n"
+        f"Availability: <analysis>"
+    )
+
+    try:
+        from core.llm_ollama import _generate
+        raw = await asyncio.wait_for(_generate(prompt), timeout=28.0)
+        cia: dict[str, str] = {"confidentiality": "", "integrity": "", "availability": ""}
+        for line in raw.strip().splitlines():
+            for key in cia:
+                if line.lower().startswith(f"{key}:"):
+                    cia[key] = line[len(key) + 1:].strip()
+        return {"finding_id": finding_id, "source": "ollama", **cia}
+    except Exception as exc:
+        _log.getLogger(__name__).warning("CIA impact failed for finding %s: %s", finding_id, exc)
+        return {
+            "finding_id": finding_id,
+            "source": "static",
+            **_static_cia_impact(finding.category or "", finding.severity or ""),
+        }
+
+
+def _static_cia_impact(category: str, severity: str) -> dict[str, str]:
+    cat = category.lower()
+    sev = severity.lower()
+    risk = "high" if sev in ("critical", "high") else "moderate"
+
+    if "auth" in cat or "mfa" in cat or "access" in cat:
+        return {
+            "confidentiality": f"An attacker who bypasses authentication gains {risk} read access to sensitive user data and secrets.",
+            "integrity": "Unauthorized actors could modify records, settings, or code with no audit trail.",
+            "availability": "Account takeover can lead to lockouts or deliberate disruption of services.",
+        }
+    if "secret" in cat or "credential" in cat or "token" in cat:
+        return {
+            "confidentiality": f"Exposed credentials provide {risk} access to protected data across systems.",
+            "integrity": "Stolen tokens allow an attacker to make changes on behalf of the legitimate owner.",
+            "availability": "Malicious actors could revoke or rotate credentials, causing service outages.",
+        }
+    if "branch" in cat or "code" in cat or "repo" in cat:
+        return {
+            "confidentiality": "Unprotected code repositories may expose proprietary logic and embedded secrets.",
+            "integrity": f"Without branch protection, malicious or untested code can reach production — a {risk} integrity risk.",
+            "availability": "Malicious merges could introduce bugs or backdoors that degrade or halt services.",
+        }
+    return {
+        "confidentiality": f"This {sev}-severity finding may expose sensitive data to unauthorized parties.",
+        "integrity": "Exploitation of this control gap could allow unauthorized modification of data or configuration.",
+        "availability": "If exploited, this finding could contribute to service degradation or disruption.",
+    }
+
+
 async def _run_ollama_all(finding_dict: dict, posture_ctx: dict) -> tuple[str, str, float, str, str]:
     """Call all Ollama generators concurrently. Returns (rem_text, rem_src, impact, expl_text, expl_src)."""
     import asyncio
