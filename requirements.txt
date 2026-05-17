@@ -43,8 +43,7 @@ respx==0.21.1             # mock httpx requests
 langchain-openai==0.1.8
 langchain-core==0.2.10
 
-# PDF generation
-weasyprint==62.3
+# PDF / report generation
 jinja2==3.1.4
 
 # Dev tools
