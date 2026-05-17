@@ -65,13 +65,19 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
     if (finding) {
       document.body.style.overflow = 'hidden'
       setCiaResult(null)
+      // Auto-generate CIA triad analysis
+      ciaImpact.mutate(finding.id, { onSuccess: (data) => setCiaResult(data) })
+      // Auto-generate remediation if not yet persisted
+      if (finding.status === 'open' && !finding.generated_remediation) {
+        remediate.mutate(finding.id)
+      }
     } else {
       document.body.style.overflow = ''
     }
     return () => {
       document.body.style.overflow = ''
     }
-  }, [finding])
+  }, [finding?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!finding) return null
 
@@ -222,37 +228,22 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
             </section>
           )}
 
-          {/* CIA Triad Impact */}
+          {/* CIA Triad Impact — auto-generated on drawer open */}
           <section>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <p className="label" style={{ marginBottom: 0 }}>
-                CIA Triad Impact
-                {ciaResult?.source === 'ollama' && (
-                  <span style={{ fontWeight: 400, color: 'var(--accent)', marginLeft: 6, textTransform: 'none', fontSize: '0.6875rem' }}>
-                    ✦ AI-generated
-                  </span>
-                )}
-              </p>
-              {!ciaResult && (
-                <button
-                  onClick={() => {
-                    if (!finding) return
-                    ciaImpact.mutate(finding.id, { onSuccess: (data) => setCiaResult(data) })
-                  }}
-                  disabled={ciaImpact.isPending}
-                  className="btn-ghost"
-                  style={{ fontSize: '0.6875rem', padding: '3px 8px', gap: 4 }}
-                  title="Analyze CIA triad impact with Ollama"
-                >
-                  {ciaImpact.isPending
-                    ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
-                    : <span style={{ fontSize: 11 }}>✦</span>
-                  }
-                  {ciaImpact.isPending ? 'Analyzing…' : 'Analyze Impact'}
-                </button>
+            <p className="label" style={{ marginBottom: 6 }}>
+              CIA Triad Impact
+              {ciaResult?.source === 'ollama' && (
+                <span style={{ fontWeight: 400, color: 'var(--accent)', marginLeft: 6, textTransform: 'none', fontSize: '0.6875rem' }}>
+                  ✦ AI-generated
+                </span>
               )}
-            </div>
-            {ciaResult ? (
+            </p>
+            {ciaImpact.isPending && !ciaResult ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Loader2 size={12} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent)' }} />
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Analyzing CIA triad impact…</p>
+              </div>
+            ) : ciaResult ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {([
                   { key: 'confidentiality', label: 'C', title: 'Confidentiality', color: '#6366f1' },
@@ -273,46 +264,25 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
                   </div>
                 ))}
               </div>
-            ) : !ciaImpact.isPending && (
-              <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                Click "Analyze Impact" to get a CIA triad assessment from the AI.
-              </p>
-            )}
+            ) : null}
           </section>
 
-          {/* Remediation */}
+          {/* Remediation — auto-generated on drawer open if not yet persisted */}
           <section>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <p className="label" style={{ marginBottom: 0 }}>
-                Remediation
-                {finding.remediation_source === 'ollama' && (
-                  <span style={{ fontWeight: 400, color: 'var(--accent)', marginLeft: 6, textTransform: 'none', fontSize: '0.6875rem' }}>
-                    ✦ AI-generated
-                  </span>
-                )}
-              </p>
-              {finding.status === 'open' && (
-                <button
-                  onClick={() => remediate.mutate(finding.id)}
-                  disabled={remediate.isPending}
-                  className="btn-ghost"
-                  style={{ fontSize: '0.6875rem', padding: '3px 8px', gap: 4 }}
-                  title="Generate AI remediation with Ollama"
-                >
-                  {remediate.isPending
-                    ? <Loader2 size={11} style={{ animation: 'spin 1s linear infinite' }} />
-                    : <span style={{ fontSize: 11 }}>✦</span>
-                  }
-                  {remediate.isPending ? 'Generating…' : 'AI Remediation'}
-                </button>
+            <p className="label" style={{ marginBottom: 6 }}>
+              Remediation
+              {finding.remediation_source === 'ollama' && (
+                <span style={{ fontWeight: 400, color: 'var(--accent)', marginLeft: 6, textTransform: 'none', fontSize: '0.6875rem' }}>
+                  ✦ AI-generated
+                </span>
               )}
-            </div>
-            {remediate.isError && (
-              <p style={{ fontSize: '0.75rem', color: 'var(--sev-critical)', marginBottom: 6 }}>
-                Ollama unavailable — try again later.
-              </p>
-            )}
-            {(finding.generated_remediation || finding.remediation) ? (
+            </p>
+            {remediate.isPending && !finding.generated_remediation ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Loader2 size={12} style={{ animation: 'spin 1s linear infinite', color: 'var(--accent)' }} />
+                <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Generating AI remediation…</p>
+              </div>
+            ) : (finding.generated_remediation || finding.remediation) ? (
               <>
                 <p style={{ fontSize: '0.875rem', color: 'var(--text)', whiteSpace: 'pre-line' }}>
                   {finding.generated_remediation || finding.remediation}
@@ -328,7 +298,7 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
               </>
             ) : (
               <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                No remediation guidance yet — click "AI Remediation" to generate one.
+                No remediation guidance available.
               </p>
             )}
           </section>

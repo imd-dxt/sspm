@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from sqlalchemy import func
@@ -161,7 +161,7 @@ def test_connector(connector_id: str, db: DB) -> dict[str, Any]:
         400: {"description": "Unknown platform"},
     },
 )
-def trigger_sync(connector_id: str, db: DB) -> ScanRun:
+def trigger_sync(connector_id: str, db: DB, background_tasks: BackgroundTasks) -> ScanRun:
     """
     Trigger a synchronous scan for the connector.
 
@@ -227,6 +227,7 @@ def trigger_sync(connector_id: str, db: DB) -> ScanRun:
         except Exception as snap_exc:
             log.warning("compliance_snapshot_error: %s", snap_exc)
 
+        background_tasks.add_task(_bg_post_sync, obj.platform_name, str(scan_run.id))
         return scan_run
 
     except HTTPException:
@@ -243,6 +244,148 @@ def trigger_sync(connector_id: str, db: DB) -> ScanRun:
         db.commit()
         db.refresh(scan_run)
         return scan_run
+
+
+# ── Background post-sync tasks ────────────────────────────────────────────────
+
+async def _bg_post_sync(platform: str, scan_run_id: str) -> None:
+    """
+    Runs after every successful sync (as a FastAPI BackgroundTask):
+    1. Auto-generate AI remediation + impact for new open findings.
+    2. Pre-generate compliance reports for all frameworks so admins can download immediately.
+    """
+    import asyncio
+    from database.session import SessionLocal
+    from database.models import Finding, Rule
+    from core.compliance_engine import FRAMEWORKS
+
+    log.info("bg_post_sync: start platform=%s scan=%s", platform, scan_run_id)
+
+    # ── 1. Generate remediations for new findings ─────────────────────────────
+    db0 = SessionLocal()
+    try:
+        new_findings = db0.query(Finding).filter(
+            Finding.scan_run_id == scan_run_id,
+            Finding.status == "open",
+            Finding.generated_remediation.is_(None),
+        ).all()
+        finding_ids = [f.id for f in new_findings]
+        # build per-platform posture context once
+        from sqlalchemy import func as sqlfunc
+        crit = db0.query(sqlfunc.count(Finding.id)).filter(Finding.platform == platform, Finding.severity == "critical", Finding.status == "open").scalar() or 0
+        high = db0.query(sqlfunc.count(Finding.id)).filter(Finding.platform == platform, Finding.severity == "high", Finding.status == "open").scalar() or 0
+        total_open = db0.query(sqlfunc.count(Finding.id)).filter(Finding.status == "open").scalar() or 0
+        posture_ctx = {"critical_count": crit, "high_count": high, "total_open": total_open, "platform_summary": platform}
+    finally:
+        db0.close()
+
+    sem = asyncio.Semaphore(2)
+
+    async def _gen_finding_remediation(finding_id: int) -> None:
+        async with sem:
+            db2 = SessionLocal()
+            try:
+                f = db2.get(Finding, finding_id)
+                if not f or f.generated_remediation:
+                    return
+                rule = db2.get(Rule, f.rule_id)
+                from api.routes.findings import _finding_to_dict, _run_ollama_all
+                fd = _finding_to_dict(f, db2, include_evidence=True)
+                fd["remediation"] = rule.remediation if rule else ""
+                rem_text, rem_src, impact_val, expl_text, expl_src = await asyncio.wait_for(
+                    _run_ollama_all(fd, posture_ctx), timeout=45.0
+                )
+                f.generated_remediation = rem_text
+                f.remediation_source = rem_src
+                f.impact_factor = impact_val
+                f.impact_explanation = expl_text
+                f.impact_source = expl_src
+                db2.commit()
+            except Exception as exc:
+                log.warning("bg_gen_remediation finding=%s: %s", finding_id, exc)
+            finally:
+                db2.close()
+
+    if finding_ids:
+        await asyncio.gather(*[_gen_finding_remediation(fid) for fid in finding_ids], return_exceptions=True)
+        log.info("bg_post_sync: remediated %d findings", len(finding_ids))
+
+    # ── 2. Pre-generate compliance reports for every framework ─────────────────
+    from core.compliance_engine import ComplianceEngine
+    from database.models import ComplianceReport as DbReport
+    from sqlalchemy import distinct
+    from database.models import Connector
+
+    for framework in FRAMEWORKS:
+        for target_platform in (platform, "all"):
+            try:
+                db3 = SessionLocal()
+                try:
+                    engine = ComplianceEngine()
+                    # Collect platforms for aggregation
+                    if target_platform == "all":
+                        platforms_list = [
+                            row[0] for row in db3.query(distinct(Connector.platform_name))
+                            .filter(Connector.connection_ok.is_(True)).all()
+                        ]
+                    else:
+                        platforms_list = [target_platform]
+
+                    if not platforms_list:
+                        continue
+
+                    total_rules = passed_rules = failed_rules = 0
+                    for plat in platforms_list:
+                        r = engine.calculate_score(plat, framework, db3)
+                        total_rules += r["total_rules"]
+                        passed_rules += r["passed_rules"]
+                        failed_rules += r["failed_rules"]
+
+                    if total_rules == 0:
+                        continue
+
+                    covered = passed_rules + failed_rules
+                    score = round((passed_rules / covered) * 100) if covered > 0 else 100
+
+                    # Generate narrative via Ollama
+                    from api.routes.compliance import _collect_failing_rules, FRAMEWORKS as FW_MAP
+                    failing = _collect_failing_rules(platforms_list, framework, db3)
+                    fw_name = FW_MAP.get(framework, {}).get("name", framework)
+                    from core.llm_ollama import _generate as _ollama_gen
+                    failing_ctx = "\n".join(
+                        f"- [{r.get('platform', '')}] {r['name']} ({r['severity']}): {r['open_count']} open finding(s)"
+                        for r in failing[:5]
+                    ) or "None — all controls passing."
+                    prompt = (
+                        f"GRC expert. 3-paragraph executive summary for {fw_name} compliance report.\n"
+                        f"Platforms: {', '.join(platforms_list)} | Score: {score}% | Passing: {passed_rules}/{total_rules} | Failing: {failed_rules}\n"
+                        f"Top failing:\n{failing_ctx}\n"
+                        f"P1: posture and audit readiness. P2: remediation priorities. P3: CIA triad risk. Under 140 words, no bullets."
+                    )
+                    narrative: str | None = None
+                    try:
+                        narrative = await asyncio.wait_for(_ollama_gen(prompt), timeout=30.0)
+                    except Exception:
+                        pass
+
+                    report = DbReport(
+                        platform=target_platform,
+                        framework=framework,
+                        score=score,
+                        total_rules=total_rules,
+                        passed_rules=passed_rules,
+                        failed_rules=failed_rules,
+                        ai_narrative=narrative,
+                    )
+                    db3.add(report)
+                    db3.commit()
+                    log.info("bg_post_sync: report generated platform=%s framework=%s score=%d", target_platform, framework, score)
+                finally:
+                    db3.close()
+            except Exception as exc:
+                log.warning("bg_post_sync: report failed platform=%s framework=%s: %s", target_platform, framework, exc)
+
+    log.info("bg_post_sync: complete platform=%s", platform)
 
 
 # ── Schedule ──────────────────────────────────────────────────────────────────

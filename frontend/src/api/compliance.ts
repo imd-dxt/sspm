@@ -125,6 +125,25 @@ export function useGenerateReport() {
   })
 }
 
+export function useLatestReport(framework: string): UseQueryResult<StoredReport | null> {
+  const { data: reports } = useComplianceReports()
+  return useQuery({
+    queryKey: ['compliance', 'reports', 'latest', framework],
+    queryFn: () => {
+      const match = reports?.find((r) => r.framework === framework && r.platform === 'all')
+      return match ?? null
+    },
+    enabled: !!reports,
+  })
+}
+
+export function downloadFullPostureReport(): void {
+  const link = document.createElement('a')
+  link.href = '/api/v1/compliance/report/full-posture'
+  link.download = `sspm_full_posture_${new Date().toISOString().slice(0, 10)}.pdf`
+  link.click()
+}
+
 // ── AI Assistant ──────────────────────────────────────────────────────────────
 
 export interface AskResponse {

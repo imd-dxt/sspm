@@ -338,36 +338,68 @@ def get_trends(
     ]
 
 
+def _collect_failing_rules(platforms: list[str], framework: str, db: Session) -> list[dict]:
+    """Collect open failing rule dicts across one or more platforms for a framework."""
+    sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    results: list[dict] = []
+    try:
+        for plat in platforms:
+            all_rules = db.query(Rule).filter(
+                Rule.platform.in_([plat, "cross-platform"]), Rule.is_active.is_(True)
+            ).all()
+            if framework == "CIS":
+                fw_rules = [r for r in all_rules if r.id.startswith("CIS-")]
+            else:
+                prefix = FRAMEWORKS.get(framework, {}).get("prefix", "")
+                fw_rules = [r for r in all_rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
+            for rule in fw_rules:
+                open_count = db.query(Finding).filter(
+                    Finding.rule_id == rule.id, Finding.platform == plat, Finding.status == "open"
+                ).count()
+                if open_count > 0:
+                    results.append({
+                        "name": rule.name,
+                        "severity": rule.severity or "medium",
+                        "category": rule.category or "General",
+                        "remediation": rule.remediation or "",
+                        "open_count": open_count,
+                        "platform": plat,
+                    })
+        results.sort(key=lambda r: sev_order.get(r["severity"].lower(), 99))
+    except Exception as exc:
+        log.warning("_collect_failing_rules: %s", exc)
+    return results
+
+
 @router.post("/report", response_model=StoredReport, status_code=201)
 async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
+    """Generate a compliance report. Use platform='all' to aggregate all connected platforms."""
     engine = ComplianceEngine()
-    result = engine.calculate_score(req.platform, req.framework, db)
 
-    # Collect failing rules for AI context and PDF remediation section
-    failing_rules_info: list[dict] = []
-    try:
-        all_rules = db.query(Rule).filter(Rule.platform == req.platform, Rule.is_active.is_(True)).all()
-        if req.framework == "CIS":
-            fw_rules = [r for r in all_rules if r.id.startswith("CIS-")]
-        else:
-            prefix = FRAMEWORKS.get(req.framework, {}).get("prefix", "")
-            fw_rules = [r for r in all_rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
-        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        for rule in fw_rules:
-            open_count = db.query(Finding).filter(
-                Finding.rule_id == rule.id, Finding.platform == req.platform, Finding.status == "open"
-            ).count()
-            if open_count > 0:
-                failing_rules_info.append({
-                    "name": rule.name,
-                    "severity": rule.severity or "medium",
-                    "category": rule.category or "General",
-                    "remediation": rule.remediation or "",
-                    "open_count": open_count,
-                })
-        failing_rules_info.sort(key=lambda r: sev_order.get(r["severity"].lower(), 99))
-    except Exception as exc:
-        log.warning("generate_report: could not fetch failing rules: %s", exc)
+    # Resolve platforms — "all" aggregates every connected connector
+    if req.platform == "all":
+        platforms = [
+            row[0] for row in db.query(distinct(Connector.platform_name))
+            .filter(Connector.connection_ok.is_(True)).all()
+        ]
+        if not platforms:
+            raise HTTPException(status_code=400, detail="No connected platforms found")
+        total_rules = passed_rules = failed_rules = 0
+        for plat in platforms:
+            r = engine.calculate_score(plat, req.framework, db)
+            total_rules += r["total_rules"]
+            passed_rules += r["passed_rules"]
+            failed_rules += r["failed_rules"]
+        covered = passed_rules + failed_rules
+        agg_score = round((passed_rules / covered) * 100) if covered > 0 else 100
+        result = {"score": agg_score, "total_rules": total_rules, "passed_rules": passed_rules, "failed_rules": failed_rules}
+        platforms_label = ", ".join(platforms)
+    else:
+        platforms = [req.platform]
+        result = engine.calculate_score(req.platform, req.framework, db)
+        platforms_label = req.platform
+
+    failing_rules_info = _collect_failing_rules(platforms, req.framework, db)
 
     narrative: str | None = None
     if req.with_ai_narrative:
@@ -375,17 +407,17 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
             from core.llm_ollama import _generate
             fw_name = FRAMEWORKS.get(req.framework, {}).get("name", req.framework)
             failing_ctx = "\n".join(
-                f"- {r['name']} ({r['severity']}): {r['open_count']} open finding(s)"
+                f"- [{r.get('platform', platforms_label)}] {r['name']} ({r['severity']}): {r['open_count']} open finding(s)"
                 for r in failing_rules_info[:5]
             ) or "None — all controls passing."
             prompt = (
                 f"You are a GRC (Governance, Risk, Compliance) expert. Write a concise 3-paragraph executive "
                 f"summary for a {fw_name} compliance report.\n\n"
-                f"Platform: {req.platform} | Score: {result['score']}% | "
+                f"Platforms: {platforms_label} | Score: {result['score']}% | "
                 f"Passing: {result['passed_rules']}/{result['total_rules']} rules | "
                 f"Failing: {result['failed_rules']}\n\n"
                 f"Top failing controls:\n{failing_ctx}\n\n"
-                f"Paragraph 1: Current {fw_name} posture and audit readiness. "
+                f"Paragraph 1: Current {fw_name} posture and audit readiness across all platforms. "
                 f"Paragraph 2: Priority remediation actions and GRC risk impact. "
                 f"Paragraph 3: CIA triad analysis — which of Confidentiality, Integrity, or Availability "
                 f"is most at risk from the top failing controls, and why in 1-2 sentences. "
@@ -396,7 +428,7 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
             log.warning("AI narrative failed: %s", exc)
             fw_name = FRAMEWORKS.get(req.framework, {}).get("name", req.framework)
             narrative = _professional_narrative(
-                fw_name, req.platform, result["score"],
+                fw_name, platforms_label, result["score"],
                 result["passed_rules"], result["total_rules"],
                 result["failed_rules"], failing_rules_info,
             )
@@ -469,6 +501,64 @@ def download_report_pdf(report_id: int, db: DB) -> Response:
         content=pdf_bytes,
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/report/full-posture")
+async def download_full_posture_report(db: DB) -> Response:
+    """Download a comprehensive PDF covering all frameworks × all connected platforms."""
+    connected_platforms = [
+        row[0] for row in db.query(distinct(Connector.platform_name))
+        .filter(Connector.connection_ok.is_(True)).all()
+    ]
+    if not connected_platforms:
+        raise HTTPException(status_code=400, detail="No connected platforms found")
+
+    engine = ComplianceEngine()
+    platform_scores: dict[str, list[dict]] = {}
+    for plat in connected_platforms:
+        platform_scores[plat] = []
+        for fw in FRAMEWORKS:
+            r = engine.calculate_score(plat, fw, db)
+            if r["total_rules"] > 0:
+                platform_scores[plat].append({**r, "framework_name": FRAMEWORKS[fw]["name"]})
+
+    # Collect all failing controls across every framework, deduped by name+platform
+    all_failing: list[dict] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for fw in FRAMEWORKS:
+        for rule in _collect_failing_rules(connected_platforms, fw, db):
+            key = (rule["name"], rule.get("platform", ""))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                all_failing.append(rule)
+
+    narrative: str | None = None
+    try:
+        from core.llm_ollama import _generate
+        ctx = "\n".join(
+            f"- [{r.get('platform', '')}] {r['name']} ({r['severity']})"
+            for r in all_failing[:6]
+        ) or "None"
+        prompt = (
+            f"You are a GRC expert. Write a 3-paragraph executive summary for a full security posture report "
+            f"covering {len(connected_platforms)} connected platform(s): {', '.join(connected_platforms)}.\n\n"
+            f"Top failing controls across all frameworks:\n{ctx}\n\n"
+            f"Paragraph 1: Overall security posture and multi-platform coverage. "
+            f"Paragraph 2: Highest-priority remediations needed. "
+            f"Paragraph 3: CIA triad exposure across platforms. "
+            f"Professional tone, under 180 words, no bullets."
+        )
+        narrative = await asyncio.wait_for(_generate(prompt), timeout=30.0)
+    except Exception as exc:
+        log.warning("full_posture narrative failed: %s", exc)
+
+    pdf_bytes = _build_full_posture_pdf(connected_platforms, platform_scores, all_failing, narrative)
+    today = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="sspm_full_posture_{today}.pdf"'},
     )
 
 
@@ -940,6 +1030,207 @@ def _build_pdf(report: DbReport, failing_rules: list[dict] | None = None) -> byt
         f"startxref\n{xref_pos}\n%%EOF\n"
     ).encode()
 
+    return body + xref + trailer
+
+
+def _build_full_posture_pdf(
+    platforms: list[str],
+    platform_scores: dict[str, list[dict]],
+    failing_rules: list[dict],
+    narrative: str | None = None,
+) -> bytes:
+    """Comprehensive full-posture PDF: all frameworks × all connected platforms."""
+    import textwrap
+
+    created = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    def e(s: str) -> str:
+        return _pdf_esc(_ascii_safe(str(s)))
+
+    def rgb(r: float, g: float, b: float) -> str:
+        return f"{r:.3f} {g:.3f} {b:.3f}"
+
+    def t(x: float, y: float, size: float, text: str, bold: bool = False) -> str:
+        font = "/Fb" if bold else "/F1"
+        return f"BT {font} {size} Tf 1 0 0 1 {int(x)} {int(y)} Tm ({e(text)}) Tj ET"
+
+    def divider(ypos: float) -> str:
+        return f"{rgb(0.82, 0.82, 0.82)} RG  0.4 w  20 {int(ypos)} m 592 {int(ypos)} l S"
+
+    def section(ypos: float, label: str) -> list[str]:
+        return [f"{rgb(0.09, 0.11, 0.17)} rg", t(20, ypos, 10.5, label, bold=True)]
+
+    all_results = [r for scores in platform_scores.values() for r in scores]
+    total_passed = sum(r["passed_rules"] for r in all_results)
+    total_failed = sum(r["failed_rules"] for r in all_results)
+    covered = total_passed + total_failed
+    overall_score = round((total_passed / covered) * 100) if covered > 0 else 100
+
+    ops: list[str] = []
+
+    # Header
+    ops.append(f"{rgb(0.09, 0.11, 0.17)} rg  0 750 612 42 re f")
+    ops.append(f"{rgb(0.25, 0.48, 0.98)} rg  0 748 612 3 re f")
+    ops.append(f"{rgb(1,1,1)} rg")
+    ops.append(t(20, 768, 13, "SSPM Full Security Posture Report", bold=True))
+    ops.append(t(20, 754, 8.5, f"All Platforms: {', '.join(platforms)}   |   {created}"))
+
+    # Score band
+    sc = (0.08, 0.65, 0.28) if overall_score >= 75 else (0.78, 0.52, 0.02) if overall_score >= 50 else (0.82, 0.14, 0.14)
+    ops.append(f"{rgb(0.97, 0.97, 0.98)} rg  0 688 612 52 re f")
+    ops.append(f"{rgb(*sc)} rg")
+    ops.append(t(22, 700, 38, f"{overall_score}%", bold=True))
+    ops.append(f"{rgb(0.3, 0.3, 0.3)} rg")
+    ops.append(t(145, 720, 9, f"Platforms:    {len(platforms)} connected  ({', '.join(platforms)})"))
+    ops.append(t(145, 707, 9, f"Total Rules:  {covered}   |   Passing: {total_passed}   |   Failing: {total_failed}"))
+    ops.append(t(145, 694, 9, f"Frameworks:   {', '.join(FRAMEWORKS.keys())}"))
+    badge_label = "COMPLIANT" if overall_score >= 75 else "NEEDS WORK" if overall_score >= 50 else "AT RISK"
+    ops.append(f"{rgb(*sc)} rg  460 696 110 20 re f")
+    ops.append(f"{rgb(1,1,1)} rg")
+    ops.append(t(483, 703, 9, badge_label, bold=True))
+    ops.append(divider(686))
+    y = 672.0
+
+    # Executive narrative
+    if narrative:
+        ops.extend(section(y, "Executive Summary"))
+        y -= 16
+        ops.append(f"{rgb(0.18, 0.18, 0.18)} rg")
+        for para in narrative.split("\n"):
+            if not para.strip():
+                y -= 4
+                continue
+            for wline in textwrap.wrap(_ascii_safe(para.strip()), width=96):
+                if y < 58:
+                    break
+                ops.append(t(20, y, 9.5, wline))
+                y -= 13
+            y -= 3
+        ops.append(divider(y - 4))
+        y -= 16
+
+    # Platform × Framework matrix
+    if y > 160:
+        ops.extend(section(y, "Platform x Framework Score Matrix"))
+        y -= 16
+        fw_list = list(FRAMEWORKS.keys())
+        col_w = 88.0
+        col_x = [190.0 + i * col_w for i in range(len(fw_list))]
+        row_h = 14.0
+
+        ops.append(f"{rgb(0.13, 0.15, 0.22)} rg  18 {y - 3} 576 {row_h} re f")
+        ops.append(f"{rgb(1,1,1)} rg")
+        ops.append(t(20, y + 1, 8, "Platform", bold=True))
+        for cx, fw in zip(col_x, fw_list):
+            ops.append(t(cx + 2, y + 1, 7.5, FRAMEWORKS[fw]["name"][:15], bold=True))
+        y -= row_h
+
+        for row_idx, plat in enumerate(platforms):
+            if y < 68:
+                break
+            scores_by_fw = {r["framework"]: r["score"] for r in platform_scores.get(plat, [])}
+            if row_idx % 2 == 0:
+                ops.append(f"{rgb(0.95, 0.95, 0.97)} rg  18 {y - 3} 576 {row_h} re f")
+            ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+            ops.append(t(20, y + 1, 8.5, plat.capitalize()))
+            for cx, fw in zip(col_x, fw_list):
+                sv = scores_by_fw.get(fw)
+                if sv is not None:
+                    sc2 = (0.08, 0.65, 0.28) if sv >= 75 else (0.78, 0.52, 0.02) if sv >= 50 else (0.82, 0.14, 0.14)
+                    ops.append(f"{rgb(*sc2)} rg")
+                    ops.append(t(cx + 2, y + 1, 8.5, f"{sv}%", bold=True))
+                else:
+                    ops.append(f"{rgb(0.65, 0.65, 0.65)} rg")
+                    ops.append(t(cx + 2, y + 1, 8, "N/A"))
+                ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+            y -= row_h
+
+        ops.append(divider(y - 3))
+        y -= 16
+
+    # GRC requirements overview
+    if y > 120:
+        ops.extend(section(y, "GRC Framework Requirements"))
+        y -= 14
+        for fw, ctx_text in _GRC_CONTEXT.items():
+            if y < 68:
+                break
+            ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
+            ops.append(t(20, y, 8.5, f"{FRAMEWORKS.get(fw, {}).get('name', fw)}:", bold=True))
+            y -= 12
+            ops.append(f"{rgb(0.35, 0.35, 0.35)} rg")
+            for wline in textwrap.wrap(_ascii_safe(ctx_text), width=94)[:2]:
+                if y < 68:
+                    break
+                ops.append(t(20, y, 8, wline))
+                y -= 11
+            y -= 4
+        ops.append(divider(y - 4))
+        y -= 16
+
+    # Top failing controls
+    if failing_rules and y > 100:
+        ops.extend(section(y, "Top Failing Controls (All Platforms & Frameworks)"))
+        y -= 16
+        for i, rule in enumerate(failing_rules[:5], 1):
+            if y < 58:
+                break
+            sev = rule.get("severity", "medium").lower()
+            sr2, sg2, sb2 = _SEV_COLORS.get(sev, (0.5, 0.5, 0.5))
+            ops.append(f"{rgb(sr2, sg2, sb2)} rg  18 {y - 3} 52 13 re f")
+            ops.append(f"{rgb(1,1,1)} rg")
+            ops.append(t(20, y + 1, 7, sev.upper(), bold=True))
+            ops.append(f"{rgb(0.10, 0.10, 0.10)} rg")
+            plat_tag = f"[{rule.get('platform', '')}] " if rule.get("platform") else ""
+            name = _ascii_safe(f"{plat_tag}{rule.get('name', '')}")[:86]
+            ops.append(t(76, y + 1, 9, f"{i}. {name}", bold=True))
+            y -= 14
+            remediation = _ascii_safe(rule.get("remediation", "")).strip()
+            if remediation and y > 60:
+                ops.append(f"{rgb(0.35, 0.35, 0.35)} rg")
+                for wline in textwrap.wrap(f"   -> {remediation}", width=94)[:2]:
+                    if y < 58:
+                        break
+                    ops.append(t(20, y, 8.5, wline))
+                    y -= 12
+            y -= 5
+
+    # Footer
+    ops.append(f"{rgb(0.13, 0.15, 0.22)} rg  0 0 612 28 re f")
+    ops.append(f"{rgb(0.6, 0.6, 0.6)} rg")
+    ops.append(t(20, 10, 7.5, f"Generated by SSPM Platform   |   Full Security Posture Report   |   {created}"))
+
+    stream = "\n".join(ops).encode("latin-1", errors="replace")
+
+    def obj(n: int, hdr: str, data: bytes | None = None) -> bytes:
+        if data is not None:
+            return f"{n} 0 obj\n{hdr}\nstream\n".encode() + data + b"\nendstream\nendobj\n"
+        return f"{n} 0 obj\n{hdr}\nendobj\n".encode()
+
+    o1 = obj(1, "<< /Type /Catalog /Pages 2 0 R >>")
+    o2 = obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+    o3 = obj(3, (
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        "/Resources << /Font << /F1 5 0 R /Fb 6 0 R >> >> >>"
+    ))
+    o4 = obj(4, f"<< /Length {len(stream)} >>", stream)
+    o5 = obj(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    o6 = obj(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
+
+    header = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
+    chunks = [o1, o2, o3, o4, o5, o6]
+    offsets: list[int] = []
+    pos = len(header)
+    for chunk in chunks:
+        offsets.append(pos)
+        pos += len(chunk)
+
+    body = header + b"".join(chunks)
+    xref_pos = len(body)
+    xref = b"xref\n0 7\n0000000000 65535 f \n"
+    for off in offsets:
+        xref += f"{off:010d} 00000 n \n".encode()
+    trailer = f"trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode()
     return body + xref + trailer
 
 

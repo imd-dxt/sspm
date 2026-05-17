@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react'
 import { RadialBarChart, RadialBar, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { ShieldCheck, Download, RefreshCw, Loader, CheckCircle2, XCircle, HelpCircle } from 'lucide-react'
+import { ShieldCheck, Download, RefreshCw, Loader, CheckCircle2, XCircle, HelpCircle, FileDown } from 'lucide-react'
 import {
   useComplianceReport,
   useComplianceScores,
+  useComplianceReports,
   useGenerateReport,
+  downloadFullPostureReport,
   type ComplianceStandard,
   type PlatformScore,
+  type StoredReport,
 } from '../api/compliance'
 import { useConnectors } from '../api/connectors'
 import { ScoreGauge } from '../components/compliance/ScoreGauge'
@@ -48,17 +51,26 @@ function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
 // The download uses the first available platform. No per-card selector — the
 // Platform Breakdown section already gives per-platform visibility.
 
-function FrameworkCard({ standard, defaultPlatform }: Readonly<{ standard: ComplianceStandard; defaultPlatform: string }>) {
+function FrameworkCard({ standard, latestReport }: Readonly<{ standard: ComplianceStandard; latestReport?: StoredReport | null }>) {
   const generate = useGenerateReport()
 
   function handleDownload() {
+    // If a pre-generated report exists (from post-sync background task), download it directly
+    if (latestReport) {
+      const link = document.createElement('a')
+      link.href = `${PDF_BASE}/compliance/reports/${latestReport.id}/pdf`
+      link.download = `compliance_all_${standard.id}_${latestReport.id}.pdf`
+      link.click()
+      return
+    }
+    // Otherwise generate now (all connected platforms)
     generate.mutate(
-      { platform: defaultPlatform, framework: standard.id, with_ai_narrative: true },
+      { platform: 'all', framework: standard.id, with_ai_narrative: true },
       {
         onSuccess: (report) => {
           const link = document.createElement('a')
           link.href = `${PDF_BASE}/compliance/reports/${report.id}/pdf`
-          link.download = `compliance_${defaultPlatform}_${standard.id}_${report.id}.pdf`
+          link.download = `compliance_all_${standard.id}_${report.id}.pdf`
           link.click()
         },
       },
@@ -118,7 +130,9 @@ function FrameworkCard({ standard, defaultPlatform }: Readonly<{ standard: Compl
         <button onClick={handleDownload} disabled={generate.isPending} className="btn-primary btn-sm">
           {generate.isPending
             ? <><Loader size={12} className="animate-spin" /> Generating…</>
-            : <><Download size={12} /> Download Report</>}
+            : latestReport
+              ? <><Download size={12} /> Download Report</>
+              : <><Download size={12} /> Generate &amp; Download</>}
         </button>
       </div>
       {generate.isError && (
@@ -166,6 +180,15 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
             <p style={{ fontSize: '1.125rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{value}</p>
           </div>
         ))}
+      </div>
+      <div style={{ marginLeft: 'auto' }}>
+        <button
+          onClick={downloadFullPostureReport}
+          className="btn-primary btn-sm"
+          title="Download full GRC posture report (all frameworks × all platforms)"
+        >
+          <FileDown size={13} /> Full Posture Report
+        </button>
       </div>
     </div>
   )
@@ -267,10 +290,19 @@ export default function Compliance() {
   const { data, isLoading, error, refetch } = useComplianceReport()
   const { data: scores } = useComplianceScores()
   const { data: connectors } = useConnectors()
+  const { data: reports } = useComplianceReports()
+
+  // Map framework → most recent "all" platform pre-generated report
+  const latestReportByFramework = new Map<string, StoredReport>()
+  if (reports) {
+    for (const r of reports) {
+      if (r.platform === 'all' && !latestReportByFramework.has(r.framework)) {
+        latestReportByFramework.set(r.framework, r)
+      }
+    }
+  }
 
   const platformGroups = scores ? groupByPlatform(scores) : new Map<string, PlatformScore[]>()
-  const defaultPlatform = [...platformGroups.keys()][0] ?? 'github'
-
   // Only show platforms with a successfully connected connector
   const connectedPlatformNames = [
     ...new Set(connectors?.filter((c) => c.connection_ok === true).map((c) => c.platform_name) ?? []),
@@ -326,7 +358,7 @@ export default function Compliance() {
               alignItems: 'stretch',
             }}>
               {data.standards.map((std) => (
-                <FrameworkCard key={std.id} standard={std} defaultPlatform={defaultPlatform} />
+                <FrameworkCard key={std.id} standard={std} latestReport={latestReportByFramework.get(std.id)} />
               ))}
             </div>
           </div>
