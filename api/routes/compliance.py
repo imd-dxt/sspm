@@ -15,6 +15,7 @@ Endpoints:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any
@@ -380,8 +381,8 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
                 f"Paragraph 2: Priority remediation actions and GRC risk impact. "
                 f"Professional tone, under 120 words total, no bullet points."
             )
-            narrative = await _generate(prompt)
-        except Exception as exc:
+            narrative = await asyncio.wait_for(_generate(prompt), timeout=28.0)
+        except (Exception, asyncio.TimeoutError) as exc:
             log.warning("AI narrative failed: %s", exc)
             fw_name = FRAMEWORKS.get(req.framework, {}).get("name", req.framework)
             narrative = (
@@ -483,11 +484,10 @@ async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
 
     try:
         from core.llm_ollama import _generate
-        answer = await _generate(prompt)
+        answer = await asyncio.wait_for(_generate(prompt), timeout=28.0)
         return AskResponse(answer=answer, source="ollama")
-    except Exception as exc:
+    except (Exception, asyncio.TimeoutError) as exc:
         log.warning("AI ask failed: %s", exc)
-        # Provide a useful static fallback based on the question
         answer = _static_compliance_answer(req.question)
         return AskResponse(answer=answer, source="static")
 
