@@ -254,11 +254,14 @@ def get_identity_summary(
     connector_id: Annotated[str | None, Query()] = None,
 ) -> dict[str, Any]:
     """User / admin / at-risk / resource counts for a platform."""
-    users = (
-        db.query(NormalizedEntity)
-        .filter(NormalizedEntity.platform == platform, NormalizedEntity.entity_type == "user")
-        .all()
-    )
+    users = [
+        u for u in (
+            db.query(NormalizedEntity)
+            .filter(NormalizedEntity.platform == platform, NormalizedEntity.entity_type == "user")
+            .all()
+        )
+        if (u.data_json or {}).get("metadata", {}).get("account_type") != "app"
+    ]
 
     perms = (
         db.query(NormalizedEntity)
@@ -310,11 +313,14 @@ def list_identity_users(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[dict[str, Any]]:
     """Users with admin flag, finding count, and resource list."""
-    users = (
-        db.query(NormalizedEntity)
-        .filter(NormalizedEntity.platform == platform, NormalizedEntity.entity_type == "user")
-        .all()
-    )
+    users = [
+        u for u in (
+            db.query(NormalizedEntity)
+            .filter(NormalizedEntity.platform == platform, NormalizedEntity.entity_type == "user")
+            .all()
+        )
+        if (u.data_json or {}).get("metadata", {}).get("account_type") != "app"
+    ]
 
     perms = (
         db.query(NormalizedEntity)
@@ -576,7 +582,7 @@ def get_identity_graph(
     top_resources = {r for r, _ in Counter(e[1] for e in raw_edges).most_common(max_resources)}
     edges = [e for e in raw_edges if e[0] in top_users and e[1] in top_resources]
 
-    user_entities = {
+    raw_user_entities = {
         u.platform_id: u
         for u in db.query(NormalizedEntity)
         .filter(
@@ -586,9 +592,18 @@ def get_identity_graph(
         )
         .all()
     }
+    # Exclude Jira app-type service accounts from user nodes
+    app_user_ids = {
+        uid for uid, u in raw_user_entities.items()
+        if (u.data_json or {}).get("metadata", {}).get("account_type") == "app"
+    }
+    top_users = top_users - app_user_ids
+    edges = [e for e in edges if e[0] not in app_user_ids]
+    user_entities = {uid: u for uid, u in raw_user_entities.items() if uid not in app_user_ids}
 
     # Resolve group names so UUID targets become readable labels
-    group_entities = (
+    # Filter out role entities — they should not appear as resource nodes in the map
+    all_group_entities = (
         db.query(NormalizedEntity)
         .filter(
             NormalizedEntity.platform == platform,
@@ -597,9 +612,14 @@ def get_identity_graph(
         )
         .all()
     )
+    role_ids_in_graph = {g.platform_id for g in all_group_entities if _is_role_entity(g)}
+    top_resources = top_resources - role_ids_in_graph
+    edges = [e for e in edges if e[1] not in role_ids_in_graph]
+
     group_name_map: dict[str, str] = {
         g.platform_id: (g.data_json or {}).get("name") or g.platform_id
-        for g in group_entities
+        for g in all_group_entities
+        if not _is_role_entity(g)
     }
     group_id_set = set(group_name_map)
 

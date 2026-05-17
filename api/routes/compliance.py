@@ -1024,11 +1024,10 @@ def _static_compliance_answer(question: str) -> str:
         if any(kw in q_lower for kw in keywords):
             return answer
     return (
-        "For compliance guidance, consult the relevant framework documentation: "
-        "CIS GitHub Benchmark (cisecurity.org), SOC 2 Trust Services Criteria (aicpa.org), "
-        "ISO 27001 (iso.org), or NIST CSF (nist.gov). "
-        "The AI assistant will provide detailed answers once Ollama is running — check that the "
-        "ollama container is healthy with: docker logs sspm_ollama"
+        "I don't have a specific answer for that question yet. "
+        "For framework guidance, consult: CIS GitHub Benchmark (cisecurity.org), "
+        "SOC 2 Trust Services Criteria (aicpa.org), ISO 27001 (iso.org), or NIST CSF (nist.gov). "
+        "You can also open individual findings in the Remediation tab for step-by-step fix instructions."
     )
 
 

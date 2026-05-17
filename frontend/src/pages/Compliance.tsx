@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { RadialBarChart, RadialBar, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { ShieldCheck, Download, RefreshCw, Loader, CheckCircle2, XCircle, HelpCircle } from 'lucide-react'
 import {
@@ -8,6 +8,7 @@ import {
   type ComplianceStandard,
   type PlatformScore,
 } from '../api/compliance'
+import { useIdentityPlatforms } from '../api/identities'
 import { ScoreGauge } from '../components/compliance/ScoreGauge'
 import { TrendChart } from '../components/compliance/TrendChart'
 import { formatRelative } from '../lib/utils'
@@ -21,7 +22,7 @@ const RADIAL_PALETTE = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function Stat({ icon, value, label }: Readonly<{ icon: React.ReactNode; value: number; label: string }>) {
+function Stat({ icon, value, label }: Readonly<{ icon: ReactNode; value: number; label: string }>) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
       {icon}
@@ -32,7 +33,7 @@ function Stat({ icon, value, label }: Readonly<{ icon: React.ReactNode; value: n
   )
 }
 
-function SectionLabel({ children }: Readonly<{ children: React.ReactNode }>) {
+function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <p style={{
       fontSize: '0.6875rem', fontWeight: 700, color: 'var(--text-muted)',
@@ -43,65 +44,77 @@ function SectionLabel({ children }: Readonly<{ children: React.ReactNode }>) {
   )
 }
 
-// ── Framework card ────────────────────────────────────────────────────────────
+// ── Framework card ─────────────────────────────────────────────────────────────
+// The download uses the first available platform. No per-card selector — the
+// Platform Breakdown section already gives per-platform visibility.
 
-function FrameworkCard({ standard, platforms }: Readonly<{ standard: ComplianceStandard; platforms: string[] }>) {
-  const [platform, setPlatform] = useState(platforms[0] ?? 'github')
+function FrameworkCard({ standard, defaultPlatform }: Readonly<{ standard: ComplianceStandard; defaultPlatform: string }>) {
   const generate = useGenerateReport()
 
   function handleDownload() {
     generate.mutate(
-      { platform, framework: standard.id, with_ai_narrative: true },
+      { platform: defaultPlatform, framework: standard.id, with_ai_narrative: true },
       {
         onSuccess: (report) => {
           const link = document.createElement('a')
           link.href = `${PDF_BASE}/compliance/reports/${report.id}/pdf`
-          link.download = `compliance_${platform}_${standard.id}_${report.id}.pdf`
+          link.download = `compliance_${defaultPlatform}_${standard.id}_${report.id}.pdf`
           link.click()
         },
       },
     )
   }
 
+  const hasControls = standard.total_controls > 0
+
   return (
-    <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <ScoreGauge score={standard.score} size={66} />
+    <div className="card" style={{
+      padding: '18px 20px', display: 'flex', flexDirection: 'column',
+      gap: 0, minHeight: 160,
+    }}>
+      {/* Top: gauge + info */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flex: 1 }}>
+        <ScoreGauge score={standard.score} size={62} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
+          <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', marginBottom: 2, lineHeight: 1.2 }}>
             {standard.name}
           </h3>
-          <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 8 }}>
+          <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 10, lineHeight: 1.4 }}>
             {standard.description}
           </p>
-          {standard.total_controls > 0 ? (
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-              <Stat icon={<CheckCircle2 size={11} style={{ color: 'var(--ok)' }} />} value={standard.passing_controls} label="passing" />
-              <Stat icon={<XCircle size={11} style={{ color: 'var(--sev-critical)' }} />} value={standard.failing_controls} label="failing" />
-              {standard.not_applicable_controls > 0 && (
-                <Stat icon={<HelpCircle size={11} style={{ color: 'var(--text-muted)' }} />} value={standard.not_applicable_controls} label="N/A" />
-              )}
-            </div>
-          ) : (
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>No rules mapped</p>
-          )}
+          {/* Stats row — always shown */}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Stat
+              icon={<CheckCircle2 size={11} style={{ color: 'var(--ok)' }} />}
+              value={standard.passing_controls}
+              label="passing"
+            />
+            <Stat
+              icon={<XCircle size={11} style={{ color: 'var(--sev-critical)' }} />}
+              value={standard.failing_controls}
+              label="failing"
+            />
+            {hasControls && standard.not_applicable_controls > 0 && (
+              <Stat
+                icon={<HelpCircle size={11} style={{ color: 'var(--text-muted)' }} />}
+                value={standard.not_applicable_controls}
+                label="N/A"
+              />
+            )}
+            {!hasControls && (
+              <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                No rules mapped
+              </span>
+            )}
+          </div>
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-        {platforms.length > 1 && (
-          <select
-            value={platform}
-            onChange={(e) => setPlatform(e.target.value)}
-            disabled={generate.isPending}
-            style={{
-              fontSize: '0.6875rem', padding: '4px 6px', borderRadius: 6,
-              border: '1px solid var(--border)', background: 'var(--surface-2)',
-              color: 'var(--text)', cursor: 'pointer',
-            }}
-          >
-            {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        )}
+
+      {/* Footer */}
+      <div style={{
+        display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
+        borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 12,
+      }}>
         <button onClick={handleDownload} disabled={generate.isPending} className="btn-primary btn-sm">
           {generate.isPending
             ? <><Loader size={12} className="animate-spin" /> Generating…</>
@@ -109,7 +122,7 @@ function FrameworkCard({ standard, platforms }: Readonly<{ standard: ComplianceS
         </button>
       </div>
       {generate.isError && (
-        <p style={{ fontSize: '0.6875rem', color: 'var(--sev-critical)', marginTop: -6 }}>
+        <p style={{ fontSize: '0.6875rem', color: 'var(--sev-critical)', marginTop: 4 }}>
           {generate.error instanceof Error ? generate.error.message : 'Generation failed'}
         </p>
       )}
@@ -123,7 +136,7 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
   const totalPassing = standards.reduce((s, x) => s + x.passing_controls, 0)
   const totalFailing = standards.reduce((s, x) => s + x.failing_controls, 0)
   const totalControls = standards.reduce((s, x) => s + x.total_controls, 0)
-  const color = score >= 75 ? 'var(--ok)' : score >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
+  const scoreColor = score >= 75 ? 'var(--ok)' : score >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
 
   return (
     <div style={{
@@ -135,7 +148,7 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
         <ScoreGauge score={score} size={60} />
         <div>
           <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>Overall Compliance</p>
-          <p style={{ fontSize: '1.375rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+          <p style={{ fontSize: '1.375rem', fontWeight: 700, color: scoreColor, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
             {score}%
           </p>
         </div>
@@ -147,10 +160,10 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
           { label: 'Controls', value: totalControls, color: 'var(--text)' },
           { label: 'Passing', value: totalPassing, color: 'var(--ok)' },
           { label: 'Failing', value: totalFailing, color: 'var(--sev-critical)' },
-        ].map(({ label, value, color: c }) => (
+        ].map(({ label, value, color }) => (
           <div key={label}>
             <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 2 }}>{label}</p>
-            <p style={{ fontSize: '1.125rem', fontWeight: 700, color: c, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{value}</p>
+            <p style={{ fontSize: '1.125rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{value}</p>
           </div>
         ))}
       </div>
@@ -158,9 +171,25 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
   )
 }
 
-// ── Per-platform radial card (one card per platform, one ring per framework) ──
+// ── Per-platform radial card ──────────────────────────────────────────────────
 
 function PlatformRadialCard({ platform, scores }: Readonly<{ platform: string; scores: PlatformScore[] }>) {
+  // Empty state: platform connected but no compliance rules defined yet
+  if (scores.length === 0) {
+    return (
+      <div className="card" style={{
+        padding: '18px 20px', flex: '1 1 220px', minWidth: 0,
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        justifyContent: 'center', gap: 6, minHeight: 140,
+      }}>
+        <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', textTransform: 'capitalize' }}>
+          {platform}
+        </h3>
+        <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>No compliance rules</p>
+      </div>
+    )
+  }
+
   const chartData = scores.map((s, i) => ({
     name: s.framework,
     score: s.score,
@@ -169,14 +198,13 @@ function PlatformRadialCard({ platform, scores }: Readonly<{ platform: string; s
   const avg = Math.round(scores.reduce((sum, s) => sum + s.score, 0) / scores.length)
   const avgColor = avg >= 75 ? 'var(--ok)' : avg >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
 
-  // Fit rings: innerRadius + n*(barSize+barGap) ≈ outerRadius
   const barSize = 12
   const barGap = 3
   const innerRadius = 18
   const outerRadius = innerRadius + scores.length * (barSize + barGap)
 
   return (
-    <div className="card" style={{ padding: '18px 20px', flex: '1 1 260px', minWidth: 0 }}>
+    <div className="card" style={{ padding: '18px 20px', flex: '1 1 220px', minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
         <div>
           <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', textTransform: 'capitalize' }}>
@@ -238,9 +266,17 @@ function groupByPlatform(scores: PlatformScore[]): Map<string, PlatformScore[]> 
 export default function Compliance() {
   const { data, isLoading, error, refetch } = useComplianceReport()
   const { data: scores } = useComplianceScores()
+  const { data: identityPlatforms } = useIdentityPlatforms()
 
   const platformGroups = scores ? groupByPlatform(scores) : new Map<string, PlatformScore[]>()
-  const availablePlatforms = [...platformGroups.keys()]
+  const defaultPlatform = [...platformGroups.keys()][0] ?? 'github'
+
+  // Combine all connected platforms (identity data) with compliance score data.
+  // This ensures platforms like Entra appear even if they have no compliance rules.
+  const connectedPlatformNames = identityPlatforms?.map((p) => p.platform) ?? []
+  const allBreakdownPlatforms = [
+    ...new Set([...platformGroups.keys(), ...connectedPlatformNames]),
+  ]
 
   return (
     <div>
@@ -279,23 +315,32 @@ export default function Compliance() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <OverallStrip score={data.overall_score} standards={data.standards} />
 
-          {/* Framework cards */}
+          {/* Framework cards — unified layout, consistent height via stretch */}
           <div>
             <SectionLabel>Frameworks</SectionLabel>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+              gap: 14,
+              alignItems: 'stretch',
+            }}>
               {data.standards.map((std) => (
-                <FrameworkCard key={std.id} standard={std} platforms={availablePlatforms} />
+                <FrameworkCard key={std.id} standard={std} defaultPlatform={defaultPlatform} />
               ))}
             </div>
           </div>
 
-          {/* Per-platform radial charts — one card per platform */}
-          {platformGroups.size > 0 && (
+          {/* Per-platform breakdown — includes all connected platforms */}
+          {allBreakdownPlatforms.length > 0 && (
             <div>
               <SectionLabel>Platform Breakdown</SectionLabel>
               <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                {[...platformGroups.entries()].map(([plt, pScores]) => (
-                  <PlatformRadialCard key={plt} platform={plt} scores={pScores} />
+                {allBreakdownPlatforms.map((plt) => (
+                  <PlatformRadialCard
+                    key={plt}
+                    platform={plt}
+                    scores={platformGroups.get(plt) ?? []}
+                  />
                 ))}
               </div>
             </div>
