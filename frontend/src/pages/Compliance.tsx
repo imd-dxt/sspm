@@ -1,4 +1,7 @@
 import { useState } from 'react'
+import {
+  RadialBarChart, RadialBar, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts'
 import { ShieldCheck, Download, RefreshCw, Loader, CheckCircle2, XCircle, HelpCircle } from 'lucide-react'
 import {
   useComplianceReport,
@@ -14,6 +17,11 @@ import { formatRelative } from '../lib/utils'
 const PLATFORMS = ['github', 'entra', 'jira', 'slack']
 const PDF_BASE = '/api/v1'
 
+const RADIAL_PALETTE = [
+  '#6366f1', '#22c55e', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16',
+]
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function Stat({ icon, value, label }: Readonly<{ icon: React.ReactNode; value: number; label: string }>) {
@@ -24,6 +32,17 @@ function Stat({ icon, value, label }: Readonly<{ icon: React.ReactNode; value: n
         <strong>{value}</strong> <span style={{ color: 'var(--text-muted)' }}>{label}</span>
       </span>
     </div>
+  )
+}
+
+function SectionLabel({ children }: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <p style={{
+      fontSize: '0.6875rem', fontWeight: 700, color: 'var(--text-muted)',
+      textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 12,
+    }}>
+      {children}
+    </p>
   )
 }
 
@@ -49,22 +68,22 @@ function FrameworkCard({ standard, platform }: Readonly<{ standard: ComplianceSt
   }
 
   return (
-    <div className="card" style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-        <ScoreGauge score={standard.score} size={72} />
+    <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        <ScoreGauge score={standard.score} size={66} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
             {standard.name}
           </h3>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 8 }}>
+          <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginBottom: 8 }}>
             {standard.description}
           </p>
           {standard.total_controls > 0 ? (
-            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
-              <Stat icon={<CheckCircle2 size={12} style={{ color: 'var(--ok)' }} />} value={standard.passing_controls} label="passing" />
-              <Stat icon={<XCircle size={12} style={{ color: 'var(--sev-critical)' }} />} value={standard.failing_controls} label="failing" />
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <Stat icon={<CheckCircle2 size={11} style={{ color: 'var(--ok)' }} />} value={standard.passing_controls} label="passing" />
+              <Stat icon={<XCircle size={11} style={{ color: 'var(--sev-critical)' }} />} value={standard.failing_controls} label="failing" />
               {standard.not_applicable_controls > 0 && (
-                <Stat icon={<HelpCircle size={12} style={{ color: 'var(--text-muted)' }} />} value={standard.not_applicable_controls} label="N/A" />
+                <Stat icon={<HelpCircle size={11} style={{ color: 'var(--text-muted)' }} />} value={standard.not_applicable_controls} label="N/A" />
               )}
             </div>
           ) : (
@@ -73,12 +92,8 @@ function FrameworkCard({ standard, platform }: Readonly<{ standard: ComplianceSt
         </div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-        <button
-          onClick={handleDownload}
-          disabled={generate.isPending}
-          className="btn-primary btn-sm"
-        >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+        <button onClick={handleDownload} disabled={generate.isPending} className="btn-primary btn-sm">
           {generate.isPending
             ? <><Loader size={12} className="animate-spin" /> Generating…</>
             : <><Download size={12} /> Download Report</>}
@@ -105,11 +120,11 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
   return (
     <div style={{
       display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center',
-      padding: '16px 20px', background: 'var(--surface)',
+      padding: '14px 20px', background: 'var(--surface)',
       border: '1px solid var(--border)', borderRadius: 12,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <ScoreGauge score={score} size={64} />
+        <ScoreGauge score={score} size={60} />
         <div>
           <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>Overall Compliance</p>
           <p style={{ fontSize: '1.375rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
@@ -135,33 +150,56 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
   )
 }
 
-// ── Per-platform score card ────────────────────────────────────────────────────
+// ── Radial chart for per-platform scores ──────────────────────────────────────
 
-function PlatformScoreCard({ score }: Readonly<{ score: PlatformScore }>) {
-  const color = score.score >= 75 ? 'var(--ok)' : score.score >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
+function PlatformRadialChart({ scores }: Readonly<{ scores: PlatformScore[] }>) {
+  const chartData = scores.map((s, i) => ({
+    name: `${s.platform} · ${s.framework}`,
+    score: s.score,
+    fill: RADIAL_PALETTE[i % RADIAL_PALETTE.length],
+  }))
+
   return (
-    <div style={{
-      padding: '12px 16px', borderRadius: 10, background: 'var(--surface-2)',
-      border: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12,
-    }}>
-      <span style={{ fontSize: '1.125rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', minWidth: 52 }}>
-        {score.score}%
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: '0.8125rem', fontWeight: 500, color: 'var(--text)' }}>{score.framework}</p>
+    <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+      <div>
+        <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
+          Platform Breakdown
+        </h3>
         <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-          {score.platform} · {score.passed_rules}/{score.total_rules} rules
+          Score per platform & framework
         </p>
       </div>
-    </div>
-  )
-}
 
-function SectionLabel({ children }: Readonly<{ children: React.ReactNode }>) {
-  return (
-    <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 12 }}>
-      {children}
-    </p>
+      <ResponsiveContainer width="100%" height={240}>
+        <RadialBarChart
+          data={chartData}
+          startAngle={90}
+          endAngle={-270}
+          innerRadius={18}
+          outerRadius={105}
+          barSize={11}
+          barGap={3}
+        >
+          <RadialBar
+            dataKey="score"
+            background={{ fill: 'var(--surface-2)' } as Record<string, unknown>}
+            cornerRadius={4}
+          />
+          <Tooltip
+            formatter={(value: number) => [`${value}%`, 'Score']}
+            contentStyle={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 8, fontSize: '0.75rem',
+            }}
+          />
+          <Legend
+            iconType="circle"
+            iconSize={7}
+            wrapperStyle={{ fontSize: '0.6875rem', paddingTop: 6, lineHeight: '1.6' }}
+          />
+        </RadialBarChart>
+      </ResponsiveContainer>
+    </div>
   )
 }
 
@@ -198,9 +236,12 @@ export default function Compliance() {
 
       {isLoading && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="skeleton" style={{ height: 90, borderRadius: 12 }} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
-            {[1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 170, borderRadius: 12 }} />)}
+          <div className="skeleton" style={{ height: 84, borderRadius: 12 }} />
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 560px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+              {[1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 160, borderRadius: 12 }} />)}
+            </div>
+            <div className="skeleton" style={{ flex: '0 0 300px', height: 320, borderRadius: 12 }} />
           </div>
         </div>
       )}
@@ -219,33 +260,34 @@ export default function Compliance() {
       )}
 
       {data && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <OverallStrip score={data.overall_score} standards={data.standards} />
 
-          {/* Framework cards */}
+          {/* Frameworks + radial chart side by side */}
           <div>
             <SectionLabel>Frameworks</SectionLabel>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
-              {data.standards.map((std) => (
-                <FrameworkCard key={std.id} standard={std} platform={platform} />
-              ))}
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              {/* Framework cards grid */}
+              <div style={{
+                flex: '1 1 560px', display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14,
+              }}>
+                {data.standards.map((std) => (
+                  <FrameworkCard key={std.id} standard={std} platform={platform} />
+                ))}
+              </div>
+
+              {/* Radial chart */}
+              {scores && scores.length > 0 && (
+                <div style={{ flex: '0 0 300px' }}>
+                  <PlatformRadialChart scores={scores} />
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Per-platform breakdown */}
-          {scores && scores.length > 0 && (
-            <div>
-              <SectionLabel>Per-Platform Breakdown</SectionLabel>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                {scores.map((s) => (
-                  <PlatformScoreCard key={`${s.platform}-${s.framework}`} score={s} />
-                ))}
-              </div>
-            </div>
-          )}
-
           {data.last_updated && (
-            <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', textAlign: 'right', marginTop: -16 }}>
+            <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', textAlign: 'right', marginTop: -12 }}>
               Updated {formatRelative(data.last_updated)}
             </p>
           )}

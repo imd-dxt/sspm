@@ -385,11 +385,10 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
         except (Exception, asyncio.TimeoutError) as exc:
             log.warning("AI narrative failed: %s", exc)
             fw_name = FRAMEWORKS.get(req.framework, {}).get("name", req.framework)
-            narrative = (
-                f"{fw_name} compliance for {req.platform}: {result['score']}% "
-                f"({result['passed_rules']}/{result['total_rules']} rules passing, "
-                f"{result['failed_rules']} failing). "
-                f"AI narrative unavailable — Ollama offline or starting up."
+            narrative = _professional_narrative(
+                fw_name, req.platform, result["score"],
+                result["passed_rules"], result["total_rules"],
+                result["failed_rules"], failing_rules_info,
             )
 
     report = DbReport(
@@ -465,21 +464,40 @@ def download_report_pdf(report_id: int, db: DB) -> Response:
 
 @router.post("/ask", response_model=AskResponse)
 async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
-    context_parts: list[str] = []
-    if req.platform and req.framework:
-        engine = ComplianceEngine()
-        result = engine.calculate_score(req.platform, req.framework, db)
-        context_parts.append(
-            f"Current {req.framework} score for {req.platform}: {result['score']}% "
-            f"({result['passed_rules']}/{result['total_rules']} rules passing)"
-        )
+    # Always build full compliance context so SSPMer has complete awareness
+    ctx_lines: list[str] = []
+    try:
+        overview = _build_control_report(db)
+        ctx_lines.append(f"Overall compliance score: {overview.overall_score}%")
+        for std in overview.standards:
+            if std.total_controls > 0:
+                failing_names = [c.name for c in std.controls if c.status == "fail"][:3]
+                ctx_lines.append(
+                    f"  {std.name}: {std.score}% | {std.passing_controls} pass, "
+                    f"{std.failing_controls} fail, {std.not_applicable_controls} N/A"
+                    + (f" | Top failures: {', '.join(failing_names)}" if failing_names else "")
+                )
+    except Exception as exc:
+        log.warning("ask: could not build compliance context: %s", exc)
 
-    ctx = "\n".join(context_parts) or "No specific platform/framework context provided."
+    if req.platform and req.framework:
+        try:
+            engine = ComplianceEngine()
+            result = engine.calculate_score(req.platform, req.framework, db)
+            ctx_lines.append(
+                f"Focused context — {req.framework} on {req.platform}: {result['score']}% "
+                f"({result['passed_rules']}/{result['total_rules']} passing, {result['failed_rules']} failing)"
+            )
+        except Exception:
+            pass
+
+    ctx = "\n".join(ctx_lines) or "No compliance data available yet."
     prompt = (
-        f"You are a SaaS security compliance expert. Answer the following question concisely and accurately.\n\n"
-        f"Context:\n{ctx}\n\n"
-        f"Question: {req.question}\n\n"
-        f"Answer (2-4 sentences, professional tone, actionable where possible):"
+        f"You are SSPMer, an expert AI security advisor embedded in a SaaS Security Posture Management platform. "
+        f"You have full visibility into the organisation's compliance posture.\n\n"
+        f"Current compliance data:\n{ctx}\n\n"
+        f"User question: {req.question}\n\n"
+        f"Answer concisely (2-4 sentences), professionally, and with actionable advice where relevant:"
     )
 
     try:
@@ -540,9 +558,74 @@ def _pdf_esc(s: str) -> str:
 _SEV_COLORS = {
     "critical": (0.94, 0.27, 0.27),
     "high":     (0.92, 0.55, 0.03),
-    "medium":   (0.92, 0.70, 0.03),
-    "low":      (0.29, 0.64, 0.34),
+    "medium":   (0.85, 0.65, 0.03),
+    "low":      (0.13, 0.77, 0.37),
 }
+
+# Heatmap gradient: (light_rgb, dark_rgb) per severity — count=1 → light, count≥3 → dark
+_HEATMAP_GRADIENT = {
+    "critical": ((0.99, 0.82, 0.82), (0.82, 0.10, 0.10)),
+    "high":     ((0.99, 0.90, 0.72), (0.80, 0.40, 0.00)),
+    "medium":   ((0.99, 0.97, 0.72), (0.75, 0.57, 0.00)),
+    "low":      ((0.78, 0.95, 0.80), (0.08, 0.60, 0.25)),
+}
+
+_UNICODE_REPLACE = str.maketrans({
+    '→': '->',   # →
+    '←': '<-',   # ←
+    '⇒': '=>',   # ⇒
+    '—': '--',   # em dash —
+    '–': '-',    # en dash –
+    '’': "'",    # right single quote
+    '‘': "'",    # left single quote
+    '“': '"',    # left double quote
+    '”': '"',    # right double quote
+    '•': '-',    # bullet •
+    '…': '...',  # ellipsis …
+    ' ': ' ',    # non-breaking space
+})
+
+
+def _ascii_safe(s: str) -> str:
+    return s.translate(_UNICODE_REPLACE)
+
+
+def _heatmap_cell(sev: str, count: int) -> tuple[tuple[float, float, float] | None, str, bool]:
+    """Returns (bg_color | None, display_text, use_white_text)."""
+    if count == 0:
+        return None, '-', False
+    grad = _HEATMAP_GRADIENT.get(sev, ((0.9, 0.9, 0.9), (0.5, 0.5, 0.5)))
+    t = min((count - 1) / 2.0, 1.0)
+    r = grad[0][0] + t * (grad[1][0] - grad[0][0])
+    g = grad[0][1] + t * (grad[1][1] - grad[0][1])
+    b = grad[0][2] + t * (grad[1][2] - grad[0][2])
+    use_white = (sev in ("critical", "high") and count >= 2) or (sev == "low" and count >= 2)
+    return (r, g, b), str(count), use_white
+
+
+def _professional_narrative(fw_name: str, platform: str, score: int, passed: int, total: int,
+                             failed: int, failing_rules: list[dict]) -> str:
+    posture = "strong" if score >= 75 else "moderate" if score >= 50 else "below threshold"
+    audit = "well-positioned for an external audit" if score >= 75 else \
+            "partially audit-ready" if score >= 50 else "not yet audit-ready"
+    critical = [r for r in failing_rules if r.get("severity", "").lower() == "critical"]
+    risk_note = ""
+    if critical:
+        risk_note = (
+            f" Critical exposures include {critical[0]['name']}"
+            + (f" and {len(critical) - 1} other critical control(s)" if len(critical) > 1 else "")
+            + ", requiring immediate attention."
+        )
+    return (
+        f"The {fw_name} compliance posture for {platform} is {posture}, with {passed} of {total} "
+        f"controls passing ({score}%). The organisation is {audit} against this framework's requirements."
+        f"{risk_note}\n\n"
+        f"The {failed} failing control(s) identified below represent the primary GRC risk exposure. "
+        f"Prioritising critical and high-severity findings will yield the greatest improvement in audit "
+        f"readiness and regulatory alignment. A structured remediation plan with clear ownership and "
+        f"defined timelines is recommended."
+    )
+
 
 _GRC_CONTEXT = {
     "CIS":      "CIS Benchmarks provide prescriptive hardening guidance used as a baseline in SOC 2, ISO 27001, and FedRAMP audits.",
@@ -555,151 +638,194 @@ _GRC_CONTEXT = {
 def _build_pdf(report: DbReport, failing_rules: list[dict] | None = None) -> bytes:
     """
     Generate a PDF/1.4 compliance report using only the Python standard library.
-    Sections: header, score, executive summary, GRC context, heatmap, remediation, footer.
+    Sections: header, score band, executive summary, GRC context, heatmap, remediation, footer.
+    All text is sanitised to ASCII before encoding to avoid '?' replacement glyphs.
     """
     import textwrap
 
     fw_name = FRAMEWORKS.get(report.framework, {}).get("name", report.framework)
     created = report.created_at.strftime("%Y-%m-%d %H:%M UTC")
     failing_rules = failing_rules or []
-    e = _pdf_esc
+
+    def e(s: str) -> str:
+        return _pdf_esc(_ascii_safe(str(s)))
 
     def rgb(r: float, g: float, b: float) -> str:
         return f"{r:.3f} {g:.3f} {b:.3f}"
 
-    def t(x: int, y: int, size: float, text: str, bold: bool = False) -> str:
+    def t(x: int | float, y: int | float, size: float, text: str, bold: bool = False) -> str:
         font = "/Fb" if bold else "/F1"
-        return f"BT {font} {size} Tf 1 0 0 1 {x} {y} Tm ({e(text)}) Tj ET"
+        return f"BT {font} {size} Tf 1 0 0 1 {int(x)} {int(y)} Tm ({e(text)}) Tj ET"
+
+    def divider(ypos: float) -> str:
+        return f"{rgb(0.82, 0.82, 0.82)} RG  0.4 w  20 {int(ypos)} m 592 {int(ypos)} l S"
+
+    def section(ypos: float, label: str) -> list[str]:
+        return [
+            f"{rgb(0.09, 0.11, 0.17)} rg",
+            t(20, ypos, 10.5, label, bold=True),
+        ]
 
     ops: list[str] = []
 
-    # ── Dark header band ──────────────────────────────────────────────────────
+    # ── Header band ───────────────────────────────────────────────────────────
     ops.append(f"{rgb(0.09, 0.11, 0.17)} rg  0 750 612 42 re f")
+    # Accent stripe
+    ops.append(f"{rgb(0.25, 0.48, 0.98)} rg  0 748 612 3 re f")
     ops.append(f"{rgb(1,1,1)} rg")
-    ops.append(t(20, 768, 15, "SSPM Compliance Report", bold=True))
-    ops.append(t(20, 754, 9, f"{fw_name}  |  Platform: {report.platform}  |  {created}"))
+    ops.append(t(20, 768, 14, "SSPM Compliance Report", bold=True))
+    ops.append(t(20, 754, 8.5, f"{fw_name}   |   Platform: {report.platform}   |   {created}"))
 
-    # ── Score row ─────────────────────────────────────────────────────────────
-    sr, sg, sb = (
-        (0.13, 0.77, 0.37) if report.score >= 75 else
-        (0.92, 0.70, 0.03) if report.score >= 50 else
-        (0.94, 0.27, 0.27)
-    )
-    ops.append(f"{rgb(sr, sg, sb)} rg")
-    ops.append(t(20, 695, 42, f"{report.score}%", bold=True))
-    ops.append(f"{rgb(0.2, 0.2, 0.2)} rg")
-    ops.append(t(130, 715, 10, f"Total Rules:  {report.total_rules}"))
-    ops.append(t(130, 701, 10, f"Passing:      {report.passed_rules}"))
-    ops.append(t(130, 687, 10, f"Failing:      {report.failed_rules}"))
+    # ── Score band ────────────────────────────────────────────────────────────
+    if report.score >= 75:
+        sc = (0.08, 0.65, 0.28)
+    elif report.score >= 50:
+        sc = (0.78, 0.52, 0.02)
+    else:
+        sc = (0.82, 0.14, 0.14)
 
-    ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 672 m 592 672 l S")
-    y = 654
+    # Score block background
+    ops.append(f"{rgb(0.97, 0.97, 0.98)} rg  0 688 612 52 re f")
+    ops.append(f"{rgb(*sc)} rg")
+    ops.append(t(22, 700, 38, f"{report.score}%", bold=True))
+
+    ops.append(f"{rgb(0.3, 0.3, 0.3)} rg")
+    ops.append(t(145, 720, 9, f"Framework:    {fw_name}"))
+    ops.append(t(145, 707, 9, f"Total Rules:  {report.total_rules}"))
+    ops.append(t(145, 694, 9, f"Passing:      {report.passed_rules}   |   Failing: {report.failed_rules}"))
+
+    # Status badge
+    badge_label = "COMPLIANT" if report.score >= 75 else "NEEDS WORK" if report.score >= 50 else "AT RISK"
+    ops.append(f"{rgb(*sc)} rg  460 696 110 20 re f")
+    ops.append(f"{rgb(1,1,1)} rg")
+    ops.append(t(483, 703, 9, badge_label, bold=True))
+
+    ops.append(divider(686))
+    y = 672.0
 
     # ── Executive summary ─────────────────────────────────────────────────────
     if report.ai_narrative:
-        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
-        ops.append(t(20, y, 11, "Executive Summary", bold=True))
+        ops.extend(section(y, "Executive Summary"))
         y -= 16
-        ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+        ops.append(f"{rgb(0.18, 0.18, 0.18)} rg")
         for para in report.ai_narrative.split("\n"):
             if not para.strip():
-                y -= 5
+                y -= 4
                 continue
-            for wline in textwrap.wrap(para.strip(), width=95):
-                if y < 60:
+            for wline in textwrap.wrap(_ascii_safe(para.strip()), width=96):
+                if y < 58:
                     break
                 ops.append(t(20, y, 9.5, wline))
                 y -= 13
-            y -= 4
-        ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 {y - 4} m 592 {y - 4} l S")
+            y -= 3
+        ops.append(divider(y - 4))
         y -= 16
 
-    # ── GRC framework context ─────────────────────────────────────────────────
+    # ── GRC context ───────────────────────────────────────────────────────────
     grc_line = _GRC_CONTEXT.get(report.framework, "")
-    if grc_line and y > 100:
-        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
-        ops.append(t(20, y, 10, "GRC Context", bold=True))
+    if grc_line and y > 110:
+        ops.extend(section(y, "GRC Context"))
         y -= 14
         ops.append(f"{rgb(0.3, 0.3, 0.3)} rg")
-        for wline in textwrap.wrap(grc_line, width=95):
-            if y < 60:
+        for wline in textwrap.wrap(_ascii_safe(grc_line), width=96):
+            if y < 58:
                 break
             ops.append(t(20, y, 9, wline))
             y -= 12
-        ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 {y - 4} m 592 {y - 4} l S")
+        ops.append(divider(y - 4))
         y -= 16
 
-    # ── Security heatmap (severity × category) ────────────────────────────────
-    if failing_rules and y > 140:
-        from collections import Counter
+    # ── Security heatmap ──────────────────────────────────────────────────────
+    if failing_rules and y > 130:
         heatmap: dict[str, dict[str, int]] = {}
         for rule in failing_rules:
-            cat = rule.get("category", "General")[:24]
+            cat = _ascii_safe(rule.get("category", "General"))[:26]
             sev = rule.get("severity", "medium").lower()
             heatmap.setdefault(cat, {}).setdefault(sev, 0)
             heatmap[cat][sev] += rule.get("open_count", 1)
 
-        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
-        ops.append(t(20, y, 10, "Security Heatmap", bold=True))
-        y -= 14
+        ops.extend(section(y, "Security Heatmap"))
+        y -= 15
 
         sev_cols = ["critical", "high", "medium", "low"]
-        col_x = [220, 310, 390, 465]
-        # Header row
-        ops.append(f"{rgb(0.5, 0.5, 0.5)} rg")
-        ops.append(t(20, y, 8, "Category", bold=True))
-        for cx, sev in zip(col_x, sev_cols):
-            ops.append(t(cx, y, 8, sev.capitalize(), bold=True))
-        y -= 12
+        col_x   = [230.0, 315.0, 395.0, 470.0]
+        col_w   = 70.0
+        row_h   = 14.0
 
-        for cat, counts in list(heatmap.items())[:5]:
-            if y < 80:
+        # Header row background
+        ops.append(f"{rgb(0.13, 0.15, 0.22)} rg  18 {y - 3} 576 {row_h} re f")
+        ops.append(f"{rgb(1,1,1)} rg")
+        ops.append(t(20, y + 1, 8, "Category", bold=True))
+        for cx, sev in zip(col_x, sev_cols):
+            ops.append(t(cx + 4, y + 1, 8, sev.capitalize(), bold=True))
+        y -= row_h
+
+        for row_idx, (cat, counts) in enumerate(list(heatmap.items())[:6]):
+            if y < 68:
                 break
+            # Alternating row background
+            if row_idx % 2 == 0:
+                ops.append(f"{rgb(0.95, 0.95, 0.97)} rg  18 {y - 3} 576 {row_h} re f")
             ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
-            ops.append(t(20, y, 8.5, cat))
+            ops.append(t(20, y + 1, 8.5, cat))
+
             for cx, sev in zip(col_x, sev_cols):
                 count = counts.get(sev, 0)
-                if count:
-                    cr, cg, cb = _SEV_COLORS.get(sev, (0.5, 0.5, 0.5))
-                    ops.append(f"{rgb(cr, cg, cb)} rg")
-                    ops.append(t(cx, y, 8.5, str(count), bold=True))
-                    ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+                bg_color, display, use_white = _heatmap_cell(sev, count)
+                if bg_color:
+                    cr, cg, cb = bg_color
+                    ops.append(f"{rgb(cr, cg, cb)} rg  {cx} {y - 2} {col_w - 4} {row_h - 1} re f")
+                    ops.append(f"{rgb(1,1,1) if use_white else rgb(0.15, 0.15, 0.15)} rg")
+                    ops.append(t(cx + col_w / 2 - 4, y + 1, 8.5, display, bold=True))
                 else:
-                    ops.append(t(cx, y, 8.5, "–"))
-            y -= 12
+                    ops.append(f"{rgb(0.65, 0.65, 0.65)} rg")
+                    ops.append(t(cx + col_w / 2 - 2, y + 1, 8, display))
+                ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+            y -= row_h
 
-        ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 {y - 2} m 592 {y - 2} l S")
-        y -= 14
+        # Table border
+        ops.append(
+            f"{rgb(0.75, 0.75, 0.80)} RG  0.4 w  "
+            f"18 {y - 1} m 594 {y - 1} l S"
+        )
+        ops.append(divider(y - 3))
+        y -= 16
 
     # ── Remediation actions ───────────────────────────────────────────────────
     if failing_rules and y > 100:
-        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
-        ops.append(t(20, y, 10, "Top Remediation Actions", bold=True))
+        ops.extend(section(y, "Top Remediation Actions"))
         y -= 16
 
         for i, rule in enumerate(failing_rules[:4], 1):
-            if y < 60:
+            if y < 58:
                 break
             sev = rule.get("severity", "medium").lower()
             sr2, sg2, sb2 = _SEV_COLORS.get(sev, (0.5, 0.5, 0.5))
-            ops.append(f"{rgb(sr2, sg2, sb2)} rg")
-            label = f"{i}. {rule['name']} ({sev.upper()} · {rule['open_count']} findings)"
-            ops.append(t(20, y, 9, label[:110], bold=True))
-            y -= 13
 
-            remediation = rule.get("remediation", "").strip()
+            # Severity pill
+            ops.append(f"{rgb(sr2, sg2, sb2)} rg  18 {y - 3} 52 13 re f")
+            ops.append(f"{rgb(1,1,1)} rg")
+            ops.append(t(20, y + 1, 7, sev.upper(), bold=True))
+
+            ops.append(f"{rgb(0.10, 0.10, 0.10)} rg")
+            name = _ascii_safe(rule.get("name", ""))[:90]
+            ops.append(t(76, y + 1, 9, f"{i}. {name}", bold=True))
+            y -= 14
+
+            remediation = _ascii_safe(rule.get("remediation", "")).strip()
             if remediation and y > 60:
-                ops.append(f"{rgb(0.3, 0.3, 0.3)} rg")
-                for wline in textwrap.wrap(f"   → {remediation}", width=92)[:2]:
-                    if y < 60:
+                ops.append(f"{rgb(0.35, 0.35, 0.35)} rg")
+                for wline in textwrap.wrap(f"   -> {remediation}", width=94)[:2]:
+                    if y < 58:
                         break
                     ops.append(t(20, y, 8.5, wline))
                     y -= 12
-            y -= 4
+            y -= 5
 
     # ── Footer ────────────────────────────────────────────────────────────────
+    ops.append(f"{rgb(0.13, 0.15, 0.22)} rg  0 0 612 28 re f")
     ops.append(f"{rgb(0.6, 0.6, 0.6)} rg")
-    ops.append(t(20, 18, 8, f"Generated by SSPM  |  {fw_name}  |  {report.platform}  |  Report #{report.id}"))
+    ops.append(t(20, 10, 7.5, f"Generated by SSPM Platform   |   {fw_name}   |   {report.platform}   |   Report #{report.id}"))
 
     # ── Assemble PDF objects ──────────────────────────────────────────────────
     stream = "\n".join(ops).encode("latin-1", errors="replace")
