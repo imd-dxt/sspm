@@ -214,6 +214,11 @@ class ComplianceReport(Base):
     ai_narrative: Mapped[str | None] = mapped_column(Text, nullable=True)
     pdf_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="complete")
+    findings_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    report_title: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    platforms_assessed: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    frameworks_assessed: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
 
 # ── ActivityLog ───────────────────────────────────────────────────────────────

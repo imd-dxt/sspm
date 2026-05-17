@@ -1,0 +1,29 @@
+{% if trend_data %}
+<div class="section">
+  <div class="section-title">Compliance Trend (Last 30 Days)</div>
+  <table class="trend-table">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Platform</th>
+        <th>Framework</th>
+        <th>Score</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in trend_data[-40:] %}
+      <tr>
+        <td>{{ row.date }}</td>
+        <td>{{ row.platform | capitalize }}</td>
+        <td>{{ row.framework }}</td>
+        <td class="cell-{% if row.score >= 80 %}green{% elif row.score >= 60 %}amber{% else %}red{% endif %}">
+          {{ row.score }}%
+        </td>
+        <td>{% if row.score >= 80 %}&#x2713; Compliant{% elif row.score >= 60 %}&#x26A0; Needs Work{% else %}&#x2717; At Risk{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

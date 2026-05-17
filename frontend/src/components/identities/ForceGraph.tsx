@@ -134,10 +134,11 @@ function tick(
 
 // ── Tooltip (React) ───────────────────────────────────────────────────────────
 
-function NodeTooltip({ data, containerW, containerH }: {
+function NodeTooltip({ data, containerW, containerH, platform }: {
   data: TooltipData
   containerW: number
   containerH: number
+  platform?: string
 }) {
   const TW = 248
   let left = data.cx + 18
@@ -207,7 +208,11 @@ function NodeTooltip({ data, containerW, containerH }: {
         {isUser && u?.is_active === false && <Badge label="Inactive" />}
         {isUser && u?.is_external && <Badge label="External" bg="rgba(245,158,11,0.15)" color="#f59e0b" />}
         {isGroup && <Badge label="Group" bg={`${GROUP_COLOR}18`} color={GROUP_COLOR} />}
-        {!isUser && !isGroup && <Badge label="Resource" bg={`${RES_COLOR}18`} color={RES_COLOR} />}
+        {!isUser && !isGroup && (
+          platform === 'jira'
+            ? <Badge label="Project" bg={`${RES_COLOR}18`} color={RES_COLOR} />
+            : <Badge label="Resource" bg={`${RES_COLOR}18`} color={RES_COLOR} />
+        )}
       </div>
 
       {/* Stats */}
@@ -289,12 +294,13 @@ interface Props {
   nodes: IdentityGraphNode[]
   edges: IdentityGraphEdge[]
   users: IdentityUser[]
+  platform?: string
 }
 
 const NS = 'http://www.w3.org/2000/svg'
 const HEIGHT = 540
 
-export default function ForceGraph({ nodes, edges, users }: Props) {
+export default function ForceGraph({ nodes, edges, users, platform }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef       = useRef<SVGSVGElement>(null)
   const vpRef        = useRef<SVGGElement>(null)       // zoom/pan viewport group
@@ -688,7 +694,7 @@ export default function ForceGraph({ nodes, edges, users }: Props) {
 
       {/* Tooltip */}
       {tooltip && (
-        <NodeTooltip data={tooltip} containerW={dims.w} containerH={dims.h} />
+        <NodeTooltip data={tooltip} containerW={dims.w} containerH={dims.h} platform={platform} />
       )}
 
       {/* Legend */}

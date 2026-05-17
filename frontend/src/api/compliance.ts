@@ -108,6 +108,33 @@ export interface StoredReport {
   failed_rules: number
   ai_narrative: string | null
   created_at: string
+  status?: string
+  report_title?: string | null
+  platforms_assessed?: string[] | null
+  frameworks_assessed?: string[] | null
+}
+
+export interface HeatmapCell {
+  score: number | null
+  status: 'green' | 'amber' | 'red' | 'gray'
+  passed_rules?: number
+  failed_rules?: number
+  total_rules?: number
+}
+
+export interface HeatmapMatrix {
+  frameworks: string[]
+  platforms: string[]
+  matrix: Record<string, Record<string, HeatmapCell>>
+}
+
+export function useComplianceHeatmap(): UseQueryResult<HeatmapMatrix> {
+  return useQuery({
+    queryKey: ['compliance', 'heatmap'],
+    queryFn: () => get<HeatmapMatrix>('/compliance/heatmap'),
+    staleTime: 60_000,
+    refetchInterval: 120_000,
+  })
 }
 
 export function useComplianceReports(): UseQueryResult<StoredReport[]> {

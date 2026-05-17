@@ -1,0 +1,30 @@
+{% set grc_context = {
+  'CIS':      {'desc': 'CIS Benchmarks provide prescriptive hardening guidance used as a baseline in SOC 2, ISO 27001, and FedRAMP audits.', 'req': 'Implement Level 1 controls as a minimum baseline. Level 2 controls are required for high-risk environments.'},
+  'SOC2':     {'desc': 'SOC 2 Type II attestation demonstrates that Trust Services Criteria are continuously met for security, availability, and confidentiality.', 'req': 'Annual audit by a licensed CPA firm. Continuous evidence collection required for 6–12 month observation period.'},
+  'ISO27001': {'desc': 'ISO/IEC 27001:2022 certification signals a mature Information Security Management System (ISMS) and is required by many enterprise procurement processes.', 'req': 'Formal risk assessment, Statement of Applicability, and third-party certification body audit.'},
+  'NIST-CSF': {'desc': 'NIST CSF v1.1 is widely adopted for US regulatory alignment (HIPAA, FISMA) and supply-chain risk management.', 'req': 'Self-assessment or third-party evaluation against Identify, Protect, Detect, Respond, Recover functions.'}
+} %}
+
+<div class="section">
+  <div class="section-title">GRC Framework Requirements</div>
+  <div class="grc-grid">
+    {% for fw in frameworks %}
+      {% set ctx = grc_context.get(fw, {}) %}
+      <div class="grc-card">
+        <h4>{{ framework_names.get(fw, fw) }}</h4>
+        <p><strong>About:</strong> {{ ctx.get('desc', '') }}</p>
+        <p style="margin-top:4px"><strong>Requirement:</strong> {{ ctx.get('req', '') }}</p>
+        {% set plat_scores = [] %}
+        {% for plat in platforms %}
+          {% set s = scores.get(plat, {}).get(fw, {}) %}
+          {% if s.get('total_rules', 0) > 0 %}
+            {% set _ = plat_scores.append(plat ~ ': ' ~ s.score ~ '%') %}
+          {% endif %}
+        {% endfor %}
+        {% if plat_scores %}
+        <p style="margin-top:4px; color:#374151"><strong>Scores:</strong> {{ plat_scores | join(' · ') }}</p>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>

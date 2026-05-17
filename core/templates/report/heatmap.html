@@ -1,0 +1,30 @@
+{% if heatmap and heatmap.platforms %}
+<div class="section">
+  <div class="section-title">Compliance Heatmap — Framework × Platform</div>
+  <table class="heatmap-table">
+    <thead>
+      <tr>
+        <th>Platform</th>
+        {% for fw in heatmap.frameworks %}
+        <th>{{ framework_names.get(fw, fw) }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for plat in heatmap.platforms %}
+      <tr>
+        <td>{{ plat | capitalize }}</td>
+        {% for fw in heatmap.frameworks %}
+          {% set cell = heatmap.matrix.get(plat, {}).get(fw, {}) %}
+          {% if cell.score is not none %}
+            <td class="cell-{{ cell.status }}">{{ cell.score }}%</td>
+          {% else %}
+            <td class="cell-gray">N/A</td>
+          {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}

@@ -1,0 +1,25 @@
+{% set sev_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3} %}
+{% set all_failing = [] %}
+{% for fw in frameworks %}
+  {% for rule in failing_by_framework.get(fw, []) %}
+    {% set _ = all_failing.append(rule) %}
+  {% endfor %}
+{% endfor %}
+{% set sorted_failing = all_failing | sort(attribute='severity') %}
+
+{% if sorted_failing %}
+<div class="section">
+  <div class="section-title">Remediation Roadmap — Top Failing Controls</div>
+  {% for rule in sorted_failing[:10] %}
+    {% set sev = rule.severity | lower %}
+    <div class="remediation-item" style="border-left-color: {% if sev == 'critical' %}#dc2626{% elif sev == 'high' %}#d97706{% elif sev == 'medium' %}#f59e0b{% else %}#16a34a{% endif %}">
+      <span class="sev sev-{{ sev }}">{{ sev }}</span>
+      <div class="rule-name">{{ loop.index }}. {{ rule.name }}</div>
+      {% if rule.remediation %}
+      <div class="rule-text">{{ rule.remediation }}</div>
+      {% endif %}
+      <div class="platform-tag">Platform: {{ rule.platform }}  ·  Open findings: {{ rule.open_count }}</div>
+    </div>
+  {% endfor %}
+</div>
+{% endif %}

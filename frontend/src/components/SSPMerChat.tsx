@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Bot, X, Send, ChevronDown, ShieldCheck, AlertTriangle } from 'lucide-react'
-import { useAskCompliance, useComplianceReport, useComplianceScores, type AskResponse } from '../api/compliance'
+import { Bot, X, Send, ChevronDown } from 'lucide-react'
+import { useAskCompliance, type AskResponse } from '../api/compliance'
 
 interface Message {
   role: 'user' | 'assistant'
@@ -15,24 +15,6 @@ const SUGGESTIONS = [
   'Am I audit-ready for SOC 2?',
 ]
 
-function ScorePill({ label, score }: Readonly<{ label: string; score: number }>) {
-  const color = score >= 75 ? 'var(--ok)' : score >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      padding: '6px 10px', borderRadius: 8, background: 'var(--surface-2)',
-      border: '1px solid var(--border)', minWidth: 64,
-    }}>
-      <span style={{ fontSize: '1rem', fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-        {score}%
-      </span>
-      <span style={{ fontSize: '0.5625rem', color: 'var(--text-muted)', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-        {label}
-      </span>
-    </div>
-  )
-}
-
 export function SSPMerChat() {
   const [open, setOpen] = useState(false)
   const [messages, setMessages] = useState<Message[]>([])
@@ -40,15 +22,6 @@ export function SSPMerChat() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const ask = useAskCompliance()
-
-  const { data: overview } = useComplianceReport()
-  const { data: scores } = useComplianceScores()
-
-  // Summary stats for context strip
-  const overallScore = overview?.overall_score ?? null
-  const failingCount = overview?.standards.reduce((s, x) => s + x.failing_controls, 0) ?? 0
-  const criticalStds = overview?.standards.filter((s) => s.score < 50 && s.total_controls > 0) ?? []
-  const topScores = scores?.slice(0, 4) ?? []
 
   useEffect(() => {
     if (open) {
@@ -112,36 +85,6 @@ export function SSPMerChat() {
             </button>
           </div>
 
-          {/* Compliance context strip */}
-          {overallScore !== null && messages.length === 0 && (
-            <div style={{
-              padding: '10px 14px', background: 'var(--surface-2)',
-              borderBottom: '1px solid var(--border)', flexShrink: 0,
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <ShieldCheck size={12} style={{ color: 'var(--accent)' }} />
-                <span style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Current Posture
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                <ScorePill label="Overall" score={overallScore} />
-                {topScores.map((s) => (
-                  <ScorePill key={`${s.platform}-${s.framework}`} label={s.framework} score={s.score} />
-                ))}
-              </div>
-              {failingCount > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 8 }}>
-                  <AlertTriangle size={11} style={{ color: 'var(--sev-critical)', flexShrink: 0 }} />
-                  <span style={{ fontSize: '0.6875rem', color: 'var(--sev-critical)' }}>
-                    {failingCount} failing control{failingCount > 1 ? 's' : ''}
-                    {criticalStds.length > 0 && ` · ${criticalStds.map((s) => s.name).join(', ')} below 50%`}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Messages */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             {messages.length === 0 && (
@@ -190,9 +133,6 @@ export function SSPMerChat() {
                   whiteSpace: 'pre-wrap',
                 }}>
                   {msg.text}
-                  {msg.source === 'static' && (
-                    <div style={{ fontSize: '0.5625rem', opacity: 0.55, marginTop: 3 }}>offline mode</div>
-                  )}
                 </div>
               </div>
             ))}

@@ -132,6 +132,10 @@ class StoredReport(BaseModel):
     failed_rules: int
     ai_narrative: str | None
     created_at: str
+    status: str = "complete"
+    report_title: str | None = None
+    platforms_assessed: list[str] | None = None
+    frameworks_assessed: list[str] | None = None
 
 
 class AskRequest(BaseModel):
@@ -446,6 +450,28 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
     db.commit()
     db.refresh(report)
     return _report_out(report)
+
+
+@router.get("/heatmap")
+def get_heatmap(db: DB) -> dict:
+    """Return the framework × platform compliance score matrix."""
+    from core.compliance_engine import build_heatmap_matrix
+    return build_heatmap_matrix(db)
+
+
+@router.delete("/reports/{report_id}", status_code=204)
+def delete_report(report_id: int, db: DB) -> None:
+    report = db.get(DbReport, report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report.pdf_path:
+        try:
+            import os as _os
+            _os.remove(report.pdf_path)
+        except OSError:
+            pass
+    db.delete(report)
+    db.commit()
 
 
 @router.get("/reports", response_model=list[StoredReport])
@@ -1352,4 +1378,8 @@ def _report_out(r: DbReport) -> StoredReport:
         failed_rules=r.failed_rules,
         ai_narrative=r.ai_narrative,
         created_at=r.created_at.isoformat(),
+        status=getattr(r, "status", "complete"),
+        report_title=getattr(r, "report_title", None),
+        platforms_assessed=getattr(r, "platforms_assessed", None),
+        frameworks_assessed=getattr(r, "frameworks_assessed", None),
     )

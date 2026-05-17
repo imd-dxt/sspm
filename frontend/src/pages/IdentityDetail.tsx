@@ -25,12 +25,19 @@ const GITHUB_TABS: TabDef[] = [
   { id: 'map',   label: 'Access Map',   icon: <Map size={14} /> },
 ]
 
-const DEFAULT_TABS: TabDef[] = [
+const JIRA_TABS: TabDef[] = [
   { id: 'users',  label: 'Users',               icon: <Users size={14} /> },
   { id: 'groups', label: 'Groups / Teams',       icon: <Grid3x3 size={14} /> },
   { id: 'roles',  label: 'Roles & Permissions',  icon: <Shield size={14} /> },
   { id: 'repos',  label: 'Projects & Resources', icon: <FolderOpen size={14} /> },
   { id: 'map',    label: 'Access Map',           icon: <Map size={14} /> },
+]
+
+const ENTRAID_TABS: TabDef[] = [
+  { id: 'users',  label: 'Users',              icon: <Users size={14} /> },
+  { id: 'groups', label: 'Groups / Teams',     icon: <Grid3x3 size={14} /> },
+  { id: 'roles',  label: 'Roles & Permissions',icon: <Shield size={14} /> },
+  { id: 'map',    label: 'Access Map',         icon: <Map size={14} /> },
 ]
 
 function TabBar({
@@ -476,7 +483,7 @@ function AccessMapTab({ platform, users }: Readonly<{ platform: string; users: I
       </p>
       {filteredNodes.length === 0
         ? <EmptyState message="No connections found for this resource." />
-        : <ForceGraph nodes={filteredNodes} edges={filteredEdges} users={users} />
+        : <ForceGraph nodes={filteredNodes} edges={filteredEdges} users={users} platform={platform} />
       }
     </div>
   )
@@ -528,7 +535,7 @@ export default function IdentityDetail() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState<Tab>('users')
 
-  const platformTabs = platform === 'github' ? GITHUB_TABS : DEFAULT_TABS
+  const platformTabs = platform === 'github' ? GITHUB_TABS : platform === 'jira' ? JIRA_TABS : ENTRAID_TABS
 
   // Reset to first valid tab when platform changes
   const prevPlatformRef = useRef(platform)
