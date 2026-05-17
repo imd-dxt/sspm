@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import Header from './Header'
 import Sidebar from './Sidebar'
 import Topbar from './Topbar'
+import { SSPMerChat } from '../SSPMerChat'
 
 export default function Layout() {
   return (
@@ -16,6 +17,7 @@ export default function Layout() {
           </main>
         </div>
       </div>
+      <SSPMerChat />
     </>
   )
 }

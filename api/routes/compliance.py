@@ -334,28 +334,61 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
     engine = ComplianceEngine()
     result = engine.calculate_score(req.platform, req.framework, db)
 
+    # Collect failing rules for AI context and PDF remediation section
+    failing_rules_info: list[dict] = []
+    try:
+        all_rules = db.query(Rule).filter(Rule.platform == req.platform, Rule.is_active.is_(True)).all()
+        if req.framework == "CIS":
+            fw_rules = [r for r in all_rules if r.id.startswith("CIS-")]
+        else:
+            prefix = FRAMEWORKS.get(req.framework, {}).get("prefix", "")
+            fw_rules = [r for r in all_rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        for rule in fw_rules:
+            open_count = db.query(Finding).filter(
+                Finding.rule_id == rule.id, Finding.platform == req.platform, Finding.status == "open"
+            ).count()
+            if open_count > 0:
+                failing_rules_info.append({
+                    "name": rule.name,
+                    "severity": rule.severity or "medium",
+                    "category": rule.category or "General",
+                    "remediation": rule.remediation or "",
+                    "open_count": open_count,
+                })
+        failing_rules_info.sort(key=lambda r: sev_order.get(r["severity"].lower(), 99))
+    except Exception as exc:
+        log.warning("generate_report: could not fetch failing rules: %s", exc)
+
     narrative: str | None = None
     if req.with_ai_narrative:
         try:
             from core.llm_ollama import _generate
             fw_name = FRAMEWORKS.get(req.framework, {}).get("name", req.framework)
+            failing_ctx = "\n".join(
+                f"- {r['name']} ({r['severity']}): {r['open_count']} open finding(s)"
+                for r in failing_rules_info[:5]
+            ) or "None — all controls passing."
             prompt = (
-                f"You are a SaaS security compliance expert. Write a concise 3-paragraph executive summary "
-                f"for a {fw_name} compliance report.\n\n"
+                f"You are a GRC (Governance, Risk, Compliance) expert. Write a concise 2-paragraph executive "
+                f"summary for a {fw_name} compliance report.\n\n"
                 f"Platform: {req.platform} | Score: {result['score']}% | "
                 f"Passing: {result['passed_rules']}/{result['total_rules']} rules | "
                 f"Failing: {result['failed_rules']}\n\n"
-                f"Paragraphs: (1) current posture, (2) key risks, (3) recommended next steps. "
-                f"Professional and actionable."
+                f"Top failing controls:\n{failing_ctx}\n\n"
+                f"Paragraph 1: Current {fw_name} posture and audit readiness. "
+                f"Paragraph 2: Priority remediation actions and GRC risk impact. "
+                f"Professional tone, under 120 words total, no bullet points."
             )
             narrative = await _generate(prompt)
         except Exception as exc:
             log.warning("AI narrative failed: %s", exc)
             fw_name = FRAMEWORKS.get(req.framework, {}).get("name", req.framework)
             narrative = (
-                f"{fw_name} compliance assessment for {req.platform}: "
-                f"score {result['score']}% — {result['passed_rules']}/{result['total_rules']} rules passing. "
-                f"AI narrative unavailable (Ollama may be offline or still starting up)."
+                f"{fw_name} compliance for {req.platform}: {result['score']}% "
+                f"({result['passed_rules']}/{result['total_rules']} rules passing, "
+                f"{result['failed_rules']} failing). "
+                f"AI narrative unavailable — Ollama offline or starting up."
             )
 
     report = DbReport(
@@ -394,7 +427,33 @@ def download_report_pdf(report_id: int, db: DB) -> Response:
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    pdf_bytes = _build_pdf(report)
+    # Fetch failing rules for PDF remediation + heatmap sections
+    failing_rules_info: list[dict] = []
+    try:
+        all_rules = db.query(Rule).filter(Rule.platform == report.platform, Rule.is_active.is_(True)).all()
+        if report.framework == "CIS":
+            fw_rules = [r for r in all_rules if r.id.startswith("CIS-")]
+        else:
+            prefix = FRAMEWORKS.get(report.framework, {}).get("prefix", "")
+            fw_rules = [r for r in all_rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        for rule in fw_rules:
+            open_count = db.query(Finding).filter(
+                Finding.rule_id == rule.id, Finding.platform == report.platform, Finding.status == "open"
+            ).count()
+            if open_count > 0:
+                failing_rules_info.append({
+                    "name": rule.name,
+                    "severity": rule.severity or "medium",
+                    "category": rule.category or "General",
+                    "remediation": rule.remediation or "",
+                    "open_count": open_count,
+                })
+        failing_rules_info.sort(key=lambda r: sev_order.get(r["severity"].lower(), 99))
+    except Exception as exc:
+        log.warning("download_report_pdf: could not fetch failing rules: %s", exc)
+
+    pdf_bytes = _build_pdf(report, failing_rules_info)
     filename = f"compliance_{report.platform}_{report.framework}_{report_id}.pdf"
     return Response(
         content=pdf_bytes,
@@ -478,22 +537,33 @@ def _pdf_esc(s: str) -> str:
     )
 
 
-def _build_pdf(report: DbReport) -> bytes:
+_SEV_COLORS = {
+    "critical": (0.94, 0.27, 0.27),
+    "high":     (0.92, 0.55, 0.03),
+    "medium":   (0.92, 0.70, 0.03),
+    "low":      (0.29, 0.64, 0.34),
+}
+
+_GRC_CONTEXT = {
+    "CIS":      "CIS Benchmarks provide prescriptive hardening guidance used as a baseline in SOC 2, ISO 27001, and FedRAMP audits.",
+    "SOC2":     "SOC 2 Type II attestation demonstrates to customers and auditors that trust services criteria are continuously met.",
+    "ISO27001": "ISO/IEC 27001:2022 certification signals a mature ISMS and is required by many enterprise procurement processes.",
+    "NIST-CSF": "NIST CSF v1.1 is widely adopted for US regulatory alignment (HIPAA, FISMA) and supply-chain risk management.",
+}
+
+
+def _build_pdf(report: DbReport, failing_rules: list[dict] | None = None) -> bytes:
     """
-    Generate a valid PDF/1.4 file using only the Python standard library.
-    Uses Helvetica (a built-in PDF Type1 font) so no font embedding is needed.
-    Coordinate origin is bottom-left; page size is US Letter (612 × 792 pt).
+    Generate a PDF/1.4 compliance report using only the Python standard library.
+    Sections: header, score, executive summary, GRC context, heatmap, remediation, footer.
     """
     import textwrap
 
     fw_name = FRAMEWORKS.get(report.framework, {}).get("name", report.framework)
     created = report.created_at.strftime("%Y-%m-%d %H:%M UTC")
+    failing_rules = failing_rules or []
     e = _pdf_esc
 
-    # ── Content stream operations ─────────────────────────────────────────────
-    # rg = non-stroking (fill) color (RGB 0-1), RG = stroking color
-    # BT…ET = text block, /Fx sz Tf = select font, 1 0 0 1 x y Tm = text matrix
-    # (text) Tj = show string, x y w h re f = filled rectangle, m l S = line stroke
     def rgb(r: float, g: float, b: float) -> str:
         return f"{r:.3f} {g:.3f} {b:.3f}"
 
@@ -503,13 +573,13 @@ def _build_pdf(report: DbReport) -> bytes:
 
     ops: list[str] = []
 
-    # Dark header band (y=750 to y=792, full width)
+    # ── Dark header band ──────────────────────────────────────────────────────
     ops.append(f"{rgb(0.09, 0.11, 0.17)} rg  0 750 612 42 re f")
     ops.append(f"{rgb(1,1,1)} rg")
     ops.append(t(20, 768, 15, "SSPM Compliance Report", bold=True))
-    ops.append(t(20, 754, 9,  f"{fw_name}  |  Platform: {report.platform}  |  {created}"))
+    ops.append(t(20, 754, 9, f"{fw_name}  |  Platform: {report.platform}  |  {created}"))
 
-    # Score (large, coloured)
+    # ── Score row ─────────────────────────────────────────────────────────────
     sr, sg, sb = (
         (0.13, 0.77, 0.37) if report.score >= 75 else
         (0.92, 0.70, 0.03) if report.score >= 50 else
@@ -517,35 +587,117 @@ def _build_pdf(report: DbReport) -> bytes:
     )
     ops.append(f"{rgb(sr, sg, sb)} rg")
     ops.append(t(20, 695, 42, f"{report.score}%", bold=True))
-
-    # Stats alongside score
     ops.append(f"{rgb(0.2, 0.2, 0.2)} rg")
     ops.append(t(130, 715, 10, f"Total Rules:  {report.total_rules}"))
     ops.append(t(130, 701, 10, f"Passing:      {report.passed_rules}"))
     ops.append(t(130, 687, 10, f"Failing:      {report.failed_rules}"))
 
-    # Divider line
     ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 672 m 592 672 l S")
-
-    # AI narrative
     y = 654
+
+    # ── Executive summary ─────────────────────────────────────────────────────
     if report.ai_narrative:
         ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
-        ops.append(t(20, y, 12, "Executive Summary", bold=True))
-        y -= 18
+        ops.append(t(20, y, 11, "Executive Summary", bold=True))
+        y -= 16
         ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
         for para in report.ai_narrative.split("\n"):
             if not para.strip():
-                y -= 6
+                y -= 5
                 continue
-            for wline in textwrap.wrap(para.strip(), width=92):
-                if y < 40:
+            for wline in textwrap.wrap(para.strip(), width=95):
+                if y < 60:
                     break
                 ops.append(t(20, y, 9.5, wline))
                 y -= 13
             y -= 4
+        ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 {y - 4} m 592 {y - 4} l S")
+        y -= 16
 
-    # Footer
+    # ── GRC framework context ─────────────────────────────────────────────────
+    grc_line = _GRC_CONTEXT.get(report.framework, "")
+    if grc_line and y > 100:
+        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
+        ops.append(t(20, y, 10, "GRC Context", bold=True))
+        y -= 14
+        ops.append(f"{rgb(0.3, 0.3, 0.3)} rg")
+        for wline in textwrap.wrap(grc_line, width=95):
+            if y < 60:
+                break
+            ops.append(t(20, y, 9, wline))
+            y -= 12
+        ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 {y - 4} m 592 {y - 4} l S")
+        y -= 16
+
+    # ── Security heatmap (severity × category) ────────────────────────────────
+    if failing_rules and y > 140:
+        from collections import Counter
+        heatmap: dict[str, dict[str, int]] = {}
+        for rule in failing_rules:
+            cat = rule.get("category", "General")[:24]
+            sev = rule.get("severity", "medium").lower()
+            heatmap.setdefault(cat, {}).setdefault(sev, 0)
+            heatmap[cat][sev] += rule.get("open_count", 1)
+
+        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
+        ops.append(t(20, y, 10, "Security Heatmap", bold=True))
+        y -= 14
+
+        sev_cols = ["critical", "high", "medium", "low"]
+        col_x = [220, 310, 390, 465]
+        # Header row
+        ops.append(f"{rgb(0.5, 0.5, 0.5)} rg")
+        ops.append(t(20, y, 8, "Category", bold=True))
+        for cx, sev in zip(col_x, sev_cols):
+            ops.append(t(cx, y, 8, sev.capitalize(), bold=True))
+        y -= 12
+
+        for cat, counts in list(heatmap.items())[:5]:
+            if y < 80:
+                break
+            ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+            ops.append(t(20, y, 8.5, cat))
+            for cx, sev in zip(col_x, sev_cols):
+                count = counts.get(sev, 0)
+                if count:
+                    cr, cg, cb = _SEV_COLORS.get(sev, (0.5, 0.5, 0.5))
+                    ops.append(f"{rgb(cr, cg, cb)} rg")
+                    ops.append(t(cx, y, 8.5, str(count), bold=True))
+                    ops.append(f"{rgb(0.15, 0.15, 0.15)} rg")
+                else:
+                    ops.append(t(cx, y, 8.5, "–"))
+            y -= 12
+
+        ops.append(f"{rgb(0.8, 0.8, 0.8)} RG  0.5 w  20 {y - 2} m 592 {y - 2} l S")
+        y -= 14
+
+    # ── Remediation actions ───────────────────────────────────────────────────
+    if failing_rules and y > 100:
+        ops.append(f"{rgb(0.09, 0.11, 0.17)} rg")
+        ops.append(t(20, y, 10, "Top Remediation Actions", bold=True))
+        y -= 16
+
+        for i, rule in enumerate(failing_rules[:4], 1):
+            if y < 60:
+                break
+            sev = rule.get("severity", "medium").lower()
+            sr2, sg2, sb2 = _SEV_COLORS.get(sev, (0.5, 0.5, 0.5))
+            ops.append(f"{rgb(sr2, sg2, sb2)} rg")
+            label = f"{i}. {rule['name']} ({sev.upper()} · {rule['open_count']} findings)"
+            ops.append(t(20, y, 9, label[:110], bold=True))
+            y -= 13
+
+            remediation = rule.get("remediation", "").strip()
+            if remediation and y > 60:
+                ops.append(f"{rgb(0.3, 0.3, 0.3)} rg")
+                for wline in textwrap.wrap(f"   → {remediation}", width=92)[:2]:
+                    if y < 60:
+                        break
+                    ops.append(t(20, y, 8.5, wline))
+                    y -= 12
+            y -= 4
+
+    # ── Footer ────────────────────────────────────────────────────────────────
     ops.append(f"{rgb(0.6, 0.6, 0.6)} rg")
     ops.append(t(20, 18, 8, f"Generated by SSPM  |  {fw_name}  |  {report.platform}  |  Report #{report.id}"))
 
@@ -557,27 +709,17 @@ def _build_pdf(report: DbReport) -> bytes:
             return f"{n} 0 obj\n{hdr}\nstream\n".encode() + data + b"\nendstream\nendobj\n"
         return f"{n} 0 obj\n{hdr}\nendobj\n".encode()
 
-    # Object 1 – Catalog
     o1 = obj(1, "<< /Type /Catalog /Pages 2 0 R >>")
-    # Object 2 – Pages
     o2 = obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-    # Object 3 – Page (with two fonts: /F1 regular, /Fb bold)
     o3 = obj(3, (
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
-        "/Resources << /Font << "
-        "/F1 5 0 R "
-        "/Fb 6 0 R "
-        ">> >> >>"
+        "/Resources << /Font << /F1 5 0 R /Fb 6 0 R >> >> >>"
     ))
-    # Object 4 – Content stream
     o4 = obj(4, f"<< /Length {len(stream)} >>", stream)
-    # Object 5 – Helvetica regular
     o5 = obj(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-    # Object 6 – Helvetica bold
     o6 = obj(6, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>")
 
-    # ── Cross-reference table ─────────────────────────────────────────────────
-    header = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"  # binary-safe marker
+    header = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
     chunks = [o1, o2, o3, o4, o5, o6]
     offsets: list[int] = []
     pos = len(header)
@@ -588,7 +730,6 @@ def _build_pdf(report: DbReport) -> bytes:
     body = header + b"".join(chunks)
     xref_pos = len(body)
 
-    # Each xref entry must be exactly 20 bytes: NNNNNNNNNN GGGGG F \n
     xref = b"xref\n0 7\n0000000000 65535 f \n"
     for off in offsets:
         xref += f"{off:010d} 00000 n \n".encode()
