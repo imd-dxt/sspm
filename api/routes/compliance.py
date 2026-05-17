@@ -113,6 +113,7 @@ class TrendPoint(BaseModel):
     platform: str
     framework: str
     score: int
+    scan_run_id: str | None = None
 
 
 class GenerateReportRequest(BaseModel):
@@ -282,9 +283,13 @@ def get_compliance_overview(db: DB) -> OverallReport:
 @router.get("/scores", response_model=list[PlatformScore])
 def get_all_scores(db: DB) -> list[PlatformScore]:
     try:
-        rule_platforms = {row[0] for row in db.query(distinct(Rule.platform)).all() if row[0] != "cross-platform"}
-        connector_platforms = {row[0] for row in db.query(distinct(Connector.platform_name)).all()}
-        platforms = list(rule_platforms | connector_platforms)
+        connector_platforms = {
+            row[0]
+            for row in db.query(distinct(Connector.platform_name))
+            .filter(Connector.connection_ok.is_(True))
+            .all()
+        }
+        platforms = list(connector_platforms)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"DB error: {exc}") from exc
 
@@ -327,6 +332,7 @@ def get_trends(
             platform=s.platform,
             framework=s.framework,
             score=s.score,
+            scan_run_id=s.scan_run_id,
         )
         for s in q.order_by(ComplianceSnapshot.snapshot_date).all()
     ]

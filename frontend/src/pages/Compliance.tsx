@@ -8,7 +8,7 @@ import {
   type ComplianceStandard,
   type PlatformScore,
 } from '../api/compliance'
-import { useIdentityPlatforms } from '../api/identities'
+import { useConnectors } from '../api/connectors'
 import { ScoreGauge } from '../components/compliance/ScoreGauge'
 import { TrendChart } from '../components/compliance/TrendChart'
 import { formatRelative } from '../lib/utils'
@@ -266,14 +266,15 @@ function groupByPlatform(scores: PlatformScore[]): Map<string, PlatformScore[]> 
 export default function Compliance() {
   const { data, isLoading, error, refetch } = useComplianceReport()
   const { data: scores } = useComplianceScores()
-  const { data: identityPlatforms } = useIdentityPlatforms()
+  const { data: connectors } = useConnectors()
 
   const platformGroups = scores ? groupByPlatform(scores) : new Map<string, PlatformScore[]>()
   const defaultPlatform = [...platformGroups.keys()][0] ?? 'github'
 
-  // Combine all connected platforms (identity data) with compliance score data.
-  // This ensures platforms like Entra appear even if they have no compliance rules.
-  const connectedPlatformNames = identityPlatforms?.map((p) => p.platform) ?? []
+  // Only show platforms with a successfully connected connector
+  const connectedPlatformNames = [
+    ...new Set(connectors?.filter((c) => c.connection_ok === true).map((c) => c.platform_name) ?? []),
+  ]
   const allBreakdownPlatforms = [
     ...new Set([...platformGroups.keys(), ...connectedPlatformNames]),
   ]

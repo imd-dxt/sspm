@@ -110,13 +110,17 @@ class ComplianceEngine:
             "failed_rules": failed,
         }
 
-    def snapshot_all(self, db: Session) -> None:
-        """Persist a ComplianceSnapshot for every platform × framework with mapped rules."""
+    def snapshot_all(self, db: Session, scan_run_id: str | None = None) -> None:
+        """Persist a ComplianceSnapshot for every connected platform × framework."""
         try:
             from database.models import Connector
-            rule_platforms = {row[0] for row in db.query(distinct(Rule.platform)).all() if row[0] != "cross-platform"}
-            connector_platforms = {row[0] for row in db.query(distinct(Connector.platform_name)).all()}
-            platforms = list(rule_platforms | connector_platforms)
+            connector_platforms = {
+                row[0]
+                for row in db.query(distinct(Connector.platform_name))
+                .filter(Connector.connection_ok.is_(True))
+                .all()
+            }
+            platforms = list(connector_platforms)
         except Exception as exc:
             log.warning("compliance_snapshot: failed to fetch platforms: %s", exc)
             return
@@ -137,6 +141,7 @@ class ComplianceEngine:
                         passed_rules=result["passed_rules"],
                         failed_rules=result["failed_rules"],
                         snapshot_date=now,
+                        scan_run_id=scan_run_id,
                     ))
                     added += 1
                 except Exception as exc:

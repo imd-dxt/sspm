@@ -76,6 +76,7 @@ export interface TrendPoint {
   platform: string
   framework: string
   score: number
+  scan_run_id?: string
 }
 
 export function useComplianceTrends(

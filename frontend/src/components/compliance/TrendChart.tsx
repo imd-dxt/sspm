@@ -5,15 +5,37 @@ import { format } from 'date-fns'
 
 const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']
 
-function buildChartData(points: TrendPoint[]): { date: string; [key: string]: string | number }[] {
+type ChartRow = { label: string; fullDate: string; [key: string]: string | number }
+
+function buildChartData(points: TrendPoint[], singlePlatform: boolean): ChartRow[] {
+  const hasScanIds = points.some((p) => p.scan_run_id)
+
+  if (hasScanIds && singlePlatform) {
+    // Group by scan_run_id — each sync = one x-axis point
+    const byScan = new Map<string, { date: Date; scores: Record<string, number> }>()
+    for (const p of points) {
+      const key = p.scan_run_id!
+      if (!byScan.has(key)) {
+        byScan.set(key, { date: new Date(p.snapshot_date), scores: {} })
+      }
+      byScan.get(key)!.scores[`${p.platform}·${p.framework}`] = p.score
+    }
+    const sorted = [...byScan.entries()].sort((a, b) => a[1].date.getTime() - b[1].date.getTime())
+    return sorted.map(([, val], idx) => ({
+      label: `Sync ${idx + 1}`,
+      fullDate: format(val.date, 'MM/dd HH:mm'),
+      ...val.scores,
+    }))
+  }
+
+  // Default: group by day
   const byDate = new Map<string, Record<string, number>>()
   for (const p of points) {
-    const date = format(new Date(p.snapshot_date), 'MM/dd HH:mm')
+    const date = format(new Date(p.snapshot_date), 'MM/dd')
     if (!byDate.has(date)) byDate.set(date, {})
-    const key = `${p.platform}·${p.framework}`
-    byDate.get(date)![key] = p.score
+    byDate.get(date)![`${p.platform}·${p.framework}`] = p.score
   }
-  return [...byDate.entries()].map(([date, vals]) => ({ date, ...vals }))
+  return [...byDate.entries()].map(([date, vals]) => ({ label: date, fullDate: date, ...vals }))
 }
 
 function getSeriesKeys(points: TrendPoint[]): string[] {
@@ -31,7 +53,8 @@ export function TrendChart() {
     days,
   )
 
-  const chartData = points ? buildChartData(points) : []
+  const singlePlatform = !!filterPlatform
+  const chartData = points ? buildChartData(points, singlePlatform) : []
   const seriesKeys = points ? getSeriesKeys(points) : []
 
   return (
@@ -66,6 +89,11 @@ export function TrendChart() {
             </button>
           ))}
         </div>
+        {singlePlatform && points?.some((p) => p.scan_run_id) && (
+          <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+            · one point per sync
+          </span>
+        )}
       </div>
 
       {/* Chart */}
@@ -83,7 +111,7 @@ export function TrendChart() {
             <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis
-                dataKey="date"
+                dataKey="label"
                 tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
                 tickLine={false}
               />
@@ -97,6 +125,10 @@ export function TrendChart() {
               <Tooltip
                 contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.75rem' }}
                 formatter={(value) => [`${value}%`]}
+                labelFormatter={(label, payload) => {
+                  const row = payload?.[0]?.payload as ChartRow | undefined
+                  return row?.fullDate && row.fullDate !== label ? `${label} — ${row.fullDate}` : label
+                }}
               />
               <Legend wrapperStyle={{ fontSize: '0.75rem' }} />
               {seriesKeys.map((key, i) => (

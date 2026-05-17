@@ -195,6 +195,7 @@ class ComplianceSnapshot(Base):
     failed_rules: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     snapshot_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    scan_run_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), ForeignKey("scan_runs.id"), nullable=True, index=True)
 
 
 # ── ComplianceReport ──────────────────────────────────────────────────────────

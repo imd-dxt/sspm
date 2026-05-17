@@ -223,7 +223,7 @@ def trigger_sync(connector_id: str, db: DB) -> ScanRun:
 
         try:
             from core.compliance_engine import ComplianceEngine
-            ComplianceEngine().snapshot_all(db)
+            ComplianceEngine().snapshot_all(db, scan_run_id=str(scan_run.id))
         except Exception as snap_exc:
             log.warning("compliance_snapshot_error: %s", snap_exc)
 
