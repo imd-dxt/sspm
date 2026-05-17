@@ -459,7 +459,7 @@ def get_heatmap(db: DB) -> dict:
     return build_heatmap_matrix(db)
 
 
-@router.delete("/reports/{report_id}", status_code=204)
+@router.delete("/reports/{report_id}", status_code=204, response_class=Response)
 def delete_report(report_id: int, db: DB) -> None:
     report = db.get(DbReport, report_id)
     if not report:
