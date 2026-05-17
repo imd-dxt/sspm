@@ -196,7 +196,7 @@ class JiraConnector(BaseConnector):
 
         users = []
         for u in raw_users:
-            if u.get("accountType") == "unknown":
+            if u.get("accountType") in ("unknown", "app"):
                 continue
             users.append(self.normalize_data(u, entity_type="user"))
         return users
@@ -424,21 +424,37 @@ class JiraConnector(BaseConnector):
 
     def fetch_applications(self) -> list[dict[str, Any]]:
         """
-        Fetch installed Marketplace apps.
+        Fetch installed Marketplace apps plus app-type service accounts from user search.
 
-        Requires the token to have admin:atlassian-connect privileges.
-        Returns [] gracefully on 403 (non-admin token).
+        Marketplace addon fetch requires admin:atlassian-connect scope — handled gracefully on 403.
+        App-type accounts (accountType=="app") are always fetched from the user search endpoint.
         """
+        apps: list[dict[str, Any]] = []
+
+        # Marketplace addons (requires elevated scope)
         data = self._safe_get("/rest/atlassian-connect/1/addons")
         if data is None:
             self._log.info("apps_api_unavailable", extra={
                 "reason": "403 — token lacks admin:atlassian-connect scope"
             })
-            return []
+        else:
+            for addon in data if isinstance(data, list) else data.get("addons", []):
+                apps.append(self.normalize_data(addon, entity_type="application"))
 
-        apps = []
-        for addon in data if isinstance(data, list) else data.get("addons", []):
-            apps.append(self.normalize_data(addon, entity_type="application"))
+        # App-type service accounts from user search
+        try:
+            raw_users = self._http.get(
+                f"{self._API_BASE}/users/search",
+                params={"maxResults": 200, "startAt": 0},
+            )
+            if not isinstance(raw_users, list):
+                raw_users = raw_users.get("values", [])
+            for u in raw_users:
+                if u.get("accountType") == "app":
+                    apps.append(self.normalize_data(u, entity_type="application"))
+        except Exception as exc:
+            self._log.warning("app_users_fetch_failed", extra={"error": str(exc)})
+
         return apps
 
     # ── Normalization ─────────────────────────────────────────────────────────
@@ -553,6 +569,28 @@ class JiraConnector(BaseConnector):
             }
 
         if entity_type == "application":
+            # App-type service account (accountType=="app" from user search)
+            if raw.get("accountType") == "app":
+                account_id = raw.get("accountId", "")
+                return {
+                    "entity_type": "application",
+                    "platform": "jira",
+                    "platform_id": account_id,
+                    "name": raw.get("displayName", account_id),
+                    "is_active": raw.get("active", True),
+                    "metadata": {
+                        "key": account_id,
+                        "vendor": None,
+                        "version": None,
+                        "scopes": [],
+                        "installed_date": None,
+                        "last_used_days_ago": None,
+                        "description": raw.get("emailAddress", ""),
+                        "account_type": "app",
+                    },
+                }
+
+            # Marketplace addon
             key = raw.get("key", raw.get("name", ""))
             vendor = (raw.get("vendor") or {})
             scopes: list[str] = []
@@ -574,7 +612,7 @@ class JiraConnector(BaseConnector):
                     "version": raw.get("version"),
                     "scopes": scopes,
                     "installed_date": raw.get("installedDate"),
-                    "last_used_days_ago": None,  # not exposed by API
+                    "last_used_days_ago": None,
                     "description": raw.get("description"),
                 },
             }

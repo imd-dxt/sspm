@@ -23,12 +23,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
-from sqlalchemy import distinct
+from sqlalchemy import distinct, func
 from sqlalchemy.orm import Session
 
 from core.compliance_engine import FRAMEWORKS, ComplianceEngine, _parse_mappings
 from database.models import ComplianceReport as DbReport
-from database.models import ComplianceSnapshot, Finding, Rule
+from database.models import ComplianceSnapshot, Connector, Finding, NormalizedEntity, Rule
 from database.session import get_db
 
 log = logging.getLogger(__name__)
@@ -464,8 +464,63 @@ def download_report_pdf(report_id: int, db: DB) -> Response:
 
 @router.post("/ask", response_model=AskResponse)
 async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
-    # Always build full compliance context so SSPMer has complete awareness
     ctx_lines: list[str] = []
+
+    # ── Workspace context: connected platforms ──────────────────────────────────
+    try:
+        connectors = db.query(Connector).all()
+        connected = [c.platform_name for c in connectors if c.connection_ok]
+        all_platforms = [c.platform_name for c in connectors]
+        if connected:
+            ctx_lines.append(f"Connected platforms (healthy): {', '.join(connected)}")
+        elif all_platforms:
+            ctx_lines.append(f"Configured platforms: {', '.join(all_platforms)}")
+    except Exception as exc:
+        log.warning("ask: could not fetch connectors: %s", exc)
+
+    # ── Workspace context: open findings by severity ────────────────────────────
+    try:
+        sev_totals = (
+            db.query(Finding.severity, func.count(Finding.id))
+            .filter(Finding.status == "open")
+            .group_by(Finding.severity)
+            .all()
+        )
+        if sev_totals:
+            sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+            sev_sorted = sorted(sev_totals, key=lambda x: sev_order.get(x[0] or "low", 99))
+            sev_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in sev_sorted)
+            total_open = sum(cnt for _, cnt in sev_totals)
+            ctx_lines.append(f"Open findings: {total_open} total ({sev_str})")
+        else:
+            ctx_lines.append("Open findings: 0 (all controls passing or no scan yet)")
+    except Exception as exc:
+        log.warning("ask: could not fetch findings summary: %s", exc)
+
+    # ── Workspace context: identity counts per platform ─────────────────────────
+    try:
+        user_counts = (
+            db.query(NormalizedEntity.platform, func.count(NormalizedEntity.id))
+            .filter(NormalizedEntity.entity_type == "user")
+            .group_by(NormalizedEntity.platform)
+            .all()
+        )
+        app_counts = (
+            db.query(NormalizedEntity.platform, func.count(NormalizedEntity.id))
+            .filter(NormalizedEntity.entity_type == "application")
+            .group_by(NormalizedEntity.platform)
+            .all()
+        )
+        if user_counts:
+            users_str = ", ".join(f"{plat}: {cnt}" for plat, cnt in user_counts)
+            ctx_lines.append(f"Users per platform: {users_str}")
+        if app_counts:
+            apps_str = ", ".join(f"{plat}: {cnt}" for plat, cnt in app_counts)
+            ctx_lines.append(f"Third-party apps per platform: {apps_str}")
+    except Exception as exc:
+        log.warning("ask: could not fetch identity counts: %s", exc)
+
+    # ── Compliance scores ────────────────────────────────────────────────────────
     try:
         overview = _build_control_report(db)
         ctx_lines.append(f"Overall compliance score: {overview.overall_score}%")
@@ -491,13 +546,14 @@ async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
         except Exception:
             pass
 
-    ctx = "\n".join(ctx_lines) or "No compliance data available yet."
+    ctx = "\n".join(ctx_lines) or "No workspace data available yet."
     prompt = (
         f"You are SSPMer, an expert AI security advisor embedded in a SaaS Security Posture Management platform. "
-        f"You have full visibility into the organisation's compliance posture.\n\n"
-        f"Current compliance data:\n{ctx}\n\n"
+        f"You have full visibility into the organisation's entire workspace: connected platforms, open findings, "
+        f"identity counts, and compliance posture across all frameworks.\n\n"
+        f"Current workspace data:\n{ctx}\n\n"
         f"User question: {req.question}\n\n"
-        f"Answer concisely (2-4 sentences), professionally, and with actionable advice where relevant:"
+        f"Answer concisely (2-4 sentences), professionally, using the real data above where relevant:"
     )
 
     try:

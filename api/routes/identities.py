@@ -370,6 +370,11 @@ def _is_org_entity(entity: NormalizedEntity) -> bool:
     return bool(d.get("is_organization")) or d.get("metadata", {}).get("entity_subtype") == "organization"
 
 
+def _is_role_entity(entity: NormalizedEntity) -> bool:
+    d = entity.data_json or {}
+    return d.get("metadata", {}).get("entity_subtype") == "role"
+
+
 def _entity_resource_type(entity: NormalizedEntity) -> str | None:
     d = entity.data_json or {}
     if entity.entity_type == "group":
@@ -443,7 +448,7 @@ def list_identity_resources(
         )
         .all()
     )
-    entities = [e for e in all_entities if not _is_org_entity(e)]
+    entities = [e for e in all_entities if not _is_org_entity(e) and not _is_role_entity(e)]
 
     finding_counts = _fetch_finding_counts(db, platform, connector_id)
     sev_counts     = _fetch_sev_counts(db, platform, connector_id)

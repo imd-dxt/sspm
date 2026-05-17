@@ -12,7 +12,6 @@ import { ScoreGauge } from '../components/compliance/ScoreGauge'
 import { TrendChart } from '../components/compliance/TrendChart'
 import { formatRelative } from '../lib/utils'
 
-const PLATFORMS = ['github', 'entra', 'jira', 'slack']
 const PDF_BASE = '/api/v1'
 
 const RADIAL_PALETTE = [
@@ -46,20 +45,19 @@ function SectionLabel({ children }: Readonly<{ children: React.ReactNode }>) {
 
 // ── Framework card ────────────────────────────────────────────────────────────
 
-function FrameworkCard({ standard, platform }: Readonly<{ standard: ComplianceStandard; platform: string }>) {
+function FrameworkCard({ standard, platforms }: Readonly<{ standard: ComplianceStandard; platforms: string[] }>) {
+  const [platform, setPlatform] = useState(platforms[0] ?? 'github')
   const generate = useGenerateReport()
 
   function handleDownload() {
     generate.mutate(
       { platform, framework: standard.id, with_ai_narrative: true },
       {
-        onSuccess: (data) => {
+        onSuccess: (report) => {
           const link = document.createElement('a')
-          link.href = `${PDF_BASE}/compliance/reports/${data.id}/pdf`
-          link.download = `compliance_${platform}_${standard.id}_${data.id}.pdf`
-          document.body.appendChild(link)
+          link.href = `${PDF_BASE}/compliance/reports/${report.id}/pdf`
+          link.download = `compliance_${platform}_${standard.id}_${report.id}.pdf`
           link.click()
-          document.body.removeChild(link)
         },
       },
     )
@@ -89,7 +87,21 @@ function FrameworkCard({ standard, platform }: Readonly<{ standard: ComplianceSt
           )}
         </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+        {platforms.length > 1 && (
+          <select
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value)}
+            disabled={generate.isPending}
+            style={{
+              fontSize: '0.6875rem', padding: '4px 6px', borderRadius: 6,
+              border: '1px solid var(--border)', background: 'var(--surface-2)',
+              color: 'var(--text)', cursor: 'pointer',
+            }}
+          >
+            {platforms.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
         <button onClick={handleDownload} disabled={generate.isPending} className="btn-primary btn-sm">
           {generate.isPending
             ? <><Loader size={12} className="animate-spin" /> Generating…</>
@@ -224,11 +236,11 @@ function groupByPlatform(scores: PlatformScore[]): Map<string, PlatformScore[]> 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function Compliance() {
-  const [platform, setPlatform] = useState('github')
   const { data, isLoading, error, refetch } = useComplianceReport()
   const { data: scores } = useComplianceScores()
 
   const platformGroups = scores ? groupByPlatform(scores) : new Map<string, PlatformScore[]>()
+  const availablePlatforms = [...platformGroups.keys()]
 
   return (
     <div>
@@ -238,19 +250,6 @@ export default function Compliance() {
           <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 3 }}>
             Control coverage across CIS, SOC 2, ISO 27001, and NIST CSF
           </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Report platform:</span>
-          <select
-            value={platform}
-            onChange={(e) => setPlatform(e.target.value)}
-            style={{
-              padding: '5px 10px', borderRadius: 8, border: '1px solid var(--border)',
-              background: 'var(--surface)', color: 'var(--text)', fontSize: '0.8125rem',
-            }}
-          >
-            {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
         </div>
       </div>
 
@@ -285,7 +284,7 @@ export default function Compliance() {
             <SectionLabel>Frameworks</SectionLabel>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
               {data.standards.map((std) => (
-                <FrameworkCard key={std.id} standard={std} platform={platform} />
+                <FrameworkCard key={std.id} standard={std} platforms={availablePlatforms} />
               ))}
             </div>
           </div>
