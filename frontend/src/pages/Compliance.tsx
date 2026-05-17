@@ -1,7 +1,5 @@
 import { useState } from 'react'
-import {
-  RadialBarChart, RadialBar, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts'
+import { RadialBarChart, RadialBar, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { ShieldCheck, Download, RefreshCw, Loader, CheckCircle2, XCircle, HelpCircle } from 'lucide-react'
 import {
   useComplianceReport,
@@ -22,7 +20,7 @@ const RADIAL_PALETTE = [
   '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16',
 ]
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function Stat({ icon, value, label }: Readonly<{ icon: React.ReactNode; value: number; label: string }>) {
   return (
@@ -46,7 +44,7 @@ function SectionLabel({ children }: Readonly<{ children: React.ReactNode }>) {
   )
 }
 
-// ── Framework card with download button ───────────────────────────────────────
+// ── Framework card ────────────────────────────────────────────────────────────
 
 function FrameworkCard({ standard, platform }: Readonly<{ standard: ComplianceStandard; platform: string }>) {
   const generate = useGenerateReport()
@@ -91,7 +89,6 @@ function FrameworkCard({ standard, platform }: Readonly<{ standard: ComplianceSt
           )}
         </div>
       </div>
-
       <div style={{ display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 10 }}>
         <button onClick={handleDownload} disabled={generate.isPending} className="btn-primary btn-sm">
           {generate.isPending
@@ -99,7 +96,6 @@ function FrameworkCard({ standard, platform }: Readonly<{ standard: ComplianceSt
             : <><Download size={12} /> Download Report</>}
         </button>
       </div>
-
       {generate.isError && (
         <p style={{ fontSize: '0.6875rem', color: 'var(--sev-critical)', marginTop: -6 }}>
           {generate.error instanceof Error ? generate.error.message : 'Generation failed'}
@@ -150,43 +146,56 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
   )
 }
 
-// ── Radial chart for per-platform scores ──────────────────────────────────────
+// ── Per-platform radial card (one card per platform, one ring per framework) ──
 
-function PlatformRadialChart({ scores }: Readonly<{ scores: PlatformScore[] }>) {
+function PlatformRadialCard({ platform, scores }: Readonly<{ platform: string; scores: PlatformScore[] }>) {
   const chartData = scores.map((s, i) => ({
-    name: `${s.platform} · ${s.framework}`,
+    name: s.framework,
     score: s.score,
     fill: RADIAL_PALETTE[i % RADIAL_PALETTE.length],
   }))
+  const avg = Math.round(scores.reduce((sum, s) => sum + s.score, 0) / scores.length)
+  const avgColor = avg >= 75 ? 'var(--ok)' : avg >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
+
+  // Fit rings: innerRadius + n*(barSize+barGap) ≈ outerRadius
+  const barSize = 12
+  const barGap = 3
+  const innerRadius = 18
+  const outerRadius = innerRadius + scores.length * (barSize + barGap)
 
   return (
-    <div className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
-      <div>
-        <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
-          Platform Breakdown
-        </h3>
-        <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>
-          Score per platform & framework
-        </p>
+    <div className="card" style={{ padding: '18px 20px', flex: '1 1 260px', minWidth: 0 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+        <div>
+          <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', textTransform: 'capitalize' }}>
+            {platform}
+          </h3>
+          <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)' }}>avg across frameworks</p>
+        </div>
+        <span style={{ fontSize: '1.125rem', fontWeight: 700, color: avgColor, fontVariantNumeric: 'tabular-nums' }}>
+          {avg}%
+        </span>
       </div>
 
-      <ResponsiveContainer width="100%" height={240}>
+      <ResponsiveContainer width="100%" height={outerRadius * 2 + 40}>
         <RadialBarChart
           data={chartData}
           startAngle={90}
           endAngle={-270}
-          innerRadius={18}
-          outerRadius={105}
-          barSize={11}
-          barGap={3}
+          innerRadius={innerRadius}
+          outerRadius={outerRadius}
+          barSize={barSize}
+          barGap={barGap}
+          cx="50%"
+          cy="50%"
         >
           <RadialBar
             dataKey="score"
             background={{ fill: 'var(--surface-2)' } as Record<string, unknown>}
-            cornerRadius={4}
+            cornerRadius={3}
           />
           <Tooltip
-            formatter={(value: number) => [`${value}%`, 'Score']}
+            formatter={(value: number, name: string) => [`${value}%`, name]}
             contentStyle={{
               background: 'var(--surface)', border: '1px solid var(--border)',
               borderRadius: 8, fontSize: '0.75rem',
@@ -195,12 +204,21 @@ function PlatformRadialChart({ scores }: Readonly<{ scores: PlatformScore[] }>) 
           <Legend
             iconType="circle"
             iconSize={7}
-            wrapperStyle={{ fontSize: '0.6875rem', paddingTop: 6, lineHeight: '1.6' }}
+            wrapperStyle={{ fontSize: '0.625rem', paddingTop: 4, lineHeight: '1.7' }}
           />
         </RadialBarChart>
       </ResponsiveContainer>
     </div>
   )
+}
+
+function groupByPlatform(scores: PlatformScore[]): Map<string, PlatformScore[]> {
+  const map = new Map<string, PlatformScore[]>()
+  for (const s of scores) {
+    if (!map.has(s.platform)) map.set(s.platform, [])
+    map.get(s.platform)!.push(s)
+  }
+  return map
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -209,6 +227,8 @@ export default function Compliance() {
   const [platform, setPlatform] = useState('github')
   const { data, isLoading, error, refetch } = useComplianceReport()
   const { data: scores } = useComplianceScores()
+
+  const platformGroups = scores ? groupByPlatform(scores) : new Map<string, PlatformScore[]>()
 
   return (
     <div>
@@ -237,11 +257,8 @@ export default function Compliance() {
       {isLoading && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="skeleton" style={{ height: 84, borderRadius: 12 }} />
-          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 560px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-              {[1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 160, borderRadius: 12 }} />)}
-            </div>
-            <div className="skeleton" style={{ flex: '0 0 300px', height: 320, borderRadius: 12 }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+            {[1, 2, 3, 4].map((i) => <div key={i} className="skeleton" style={{ height: 160, borderRadius: 12 }} />)}
           </div>
         </div>
       )}
@@ -263,28 +280,27 @@ export default function Compliance() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           <OverallStrip score={data.overall_score} standards={data.standards} />
 
-          {/* Frameworks + radial chart side by side */}
+          {/* Framework cards */}
           <div>
             <SectionLabel>Frameworks</SectionLabel>
-            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              {/* Framework cards grid */}
-              <div style={{
-                flex: '1 1 560px', display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14,
-              }}>
-                {data.standards.map((std) => (
-                  <FrameworkCard key={std.id} standard={std} platform={platform} />
-                ))}
-              </div>
-
-              {/* Radial chart */}
-              {scores && scores.length > 0 && (
-                <div style={{ flex: '0 0 300px' }}>
-                  <PlatformRadialChart scores={scores} />
-                </div>
-              )}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
+              {data.standards.map((std) => (
+                <FrameworkCard key={std.id} standard={std} platform={platform} />
+              ))}
             </div>
           </div>
+
+          {/* Per-platform radial charts — one card per platform */}
+          {platformGroups.size > 0 && (
+            <div>
+              <SectionLabel>Platform Breakdown</SectionLabel>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                {[...platformGroups.entries()].map(([plt, pScores]) => (
+                  <PlatformRadialCard key={plt} platform={plt} scores={pScores} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {data.last_updated && (
             <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', textAlign: 'right', marginTop: -12 }}>
@@ -292,7 +308,7 @@ export default function Compliance() {
             </p>
           )}
 
-          {/* Trends chart */}
+          {/* Trends */}
           <div>
             <SectionLabel>Compliance Trends</SectionLabel>
             <TrendChart />

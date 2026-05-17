@@ -506,7 +506,7 @@ async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
         return AskResponse(answer=answer, source="ollama")
     except (Exception, asyncio.TimeoutError) as exc:
         log.warning("AI ask failed: %s", exc)
-        answer = _static_compliance_answer(req.question)
+        answer = _context_aware_fallback(req.question, ctx_lines)
         return AskResponse(answer=answer, source="static")
 
 
@@ -866,6 +866,46 @@ def _build_pdf(report: DbReport, failing_rules: list[dict] | None = None) -> byt
     ).encode()
 
     return body + xref + trailer
+
+
+# ── Context-aware fallback (uses real DB data when Ollama is offline) ────────
+
+def _context_aware_fallback(question: str, ctx_lines: list[str]) -> str:
+    """
+    When Ollama is unavailable, answer using the compliance context that was
+    already fetched from the DB, so score/posture questions return real numbers.
+    """
+    q = question.lower()
+
+    score_keywords = {"score", "posture", "percentage", "percent", "how am i", "how are we",
+                      "standing", "overall", "compliance level", "status", "tell me"}
+    fw_map = {
+        "cis": "CIS Benchmark", "soc2": "SOC 2", "soc 2": "SOC 2",
+        "iso27001": "ISO/IEC 27001", "iso 27001": "ISO/IEC 27001", "nist": "NIST",
+    }
+
+    if ctx_lines and any(kw in q for kw in score_keywords):
+        # Try to match a specific framework first
+        for kw, fw_label in fw_map.items():
+            if kw in q:
+                matching = [l.strip() for l in ctx_lines if fw_label in l]
+                if matching:
+                    return f"Your {fw_label} compliance posture:\n\n" + "\n".join(matching)
+
+        # Return full posture summary
+        lines = [l.strip() for l in ctx_lines if l.strip()]
+        if lines:
+            return "Here is your current compliance posture:\n\n" + "\n".join(lines)
+
+    # Framework-specific questions without explicit score ask
+    if ctx_lines:
+        for kw, fw_label in fw_map.items():
+            if kw in q:
+                matching = [l.strip() for l in ctx_lines if fw_label in l]
+                if matching:
+                    return f"{fw_label} status: " + " | ".join(matching)
+
+    return _static_compliance_answer(question)
 
 
 # ── Static fallback answers ───────────────────────────────────────────────────

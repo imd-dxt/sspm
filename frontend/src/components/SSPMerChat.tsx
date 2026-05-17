@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Bot, X, Send, Loader, ChevronDown, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { Bot, X, Send, ChevronDown, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { useAskCompliance, useComplianceReport, useComplianceScores, type AskResponse } from '../api/compliance'
 
 interface Message {
@@ -198,15 +198,29 @@ export function SSPMerChat() {
             ))}
 
             {ask.isPending && (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                 <div style={{
                   width: 26, height: 26, borderRadius: '50%', background: 'var(--accent)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
                 }}>
                   <Bot size={13} style={{ color: '#fff' }} />
                 </div>
-                <div style={{ background: 'var(--surface-2)', borderRadius: '14px 14px 14px 4px', padding: '10px 14px' }}>
-                  <Loader size={13} style={{ color: 'var(--text-muted)' }} className="animate-spin" />
+                <div style={{
+                  background: 'var(--surface-2)', borderRadius: '14px 14px 14px 4px',
+                  padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 5,
+                }}>
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="animate-bounce"
+                      style={{
+                        width: 7, height: 7, borderRadius: '50%',
+                        background: 'var(--text-muted)',
+                        animationDelay: `${i * 0.18}s`,
+                        animationDuration: '0.9s',
+                      }}
+                    />
+                  ))}
                 </div>
               </div>
             )}
