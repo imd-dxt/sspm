@@ -126,12 +126,12 @@ jobs:
             docker pull ghcr.io/$GITHUB_REPOSITORY:latest
             docker pull ghcr.io/$GITHUB_REPOSITORY-frontend:latest
 
-            # Tear down any running or orphaned containers (data lives in named volumes)
-            docker compose --project-directory . -f docker/docker-compose.yml down --remove-orphans 2>/dev/null || true
-            docker rm -f sspm_ollama sspm_neo4j sspm_postgres sspm_redis sspm_api sspm_frontend 2>/dev/null || true
+            # Ensure infra is running (idempotent — skips healthy containers)
+            docker compose --project-directory . -f docker/docker-compose.yml up -d postgres neo4j redis ollama
 
-            # Start everything — migrations run inside CMD (alembic upgrade head && uvicorn ...)
-            docker compose --project-directory . -f docker/docker-compose.yml up -d
+            # Replace only the app containers — infra stays up, no health-check wait
+            docker rm -f sspm_api sspm_frontend 2>/dev/null || true
+            docker compose --project-directory . -f docker/docker-compose.yml up -d api frontend
 
             # Remove dangling images to reclaim disk space
             docker image prune -f
