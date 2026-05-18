@@ -59,6 +59,7 @@ export function usePrioritizedActions(
         platform,
         limit,
       }),
+    staleTime: 90_000,
     refetchInterval: 120_000,
   })
 }

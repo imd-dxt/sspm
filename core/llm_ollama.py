@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 # ── Config from env vars ──────────────────────────────────────────────────────
 _OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama:11434")
 _MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
-_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120"))
+_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "30"))
 _ENABLED = os.getenv("OLLAMA_ENABLED", "true").lower() not in ("false", "0", "no")
 
 # ── In-process cache ──────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ Severity weights: critical=10, high=7, medium=4, low=1
 impact_factor per finding: float 0.0–1.0 (default 0.5, updated by Ollama)
 max_possible: number_of_open_findings × 10  (all critical, max impact)
 """
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -171,7 +172,7 @@ async def _try_ollama_actions(
     )[:limit]
 
     try:
-        raw = await _generate(_ollama_actions_prompt(top, score))
+        raw = await asyncio.wait_for(_generate(_ollama_actions_prompt(top, score)), timeout=10.0)
         # Extract first JSON array from the response
         start = raw.find("[")
         end = raw.rfind("]")
@@ -186,7 +187,7 @@ async def _try_ollama_actions(
             if isinstance(rank, int) and 1 <= rank <= len(top):
                 item["finding_id"] = top[rank - 1].id
         return parsed, "ollama"
-    except Exception as exc:
+    except (asyncio.TimeoutError, Exception) as exc:
         log.warning("Ollama prioritized actions failed: %s", exc)
         return _deterministic_actions(findings, limit), "deterministic"
 
