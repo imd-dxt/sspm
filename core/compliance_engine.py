@@ -233,6 +233,9 @@ def build_grc_report_structure(
     selected_platforms: list[str] | None = None,
     selected_frameworks: list[str] | None = None,
     report_title: str = "SSPM Security Posture Report",
+    organisation_name: str = "Your Organisation",
+    report_period_days: int = 30,
+    classification: str = "Confidential",
 ) -> dict[str, Any]:
     """
     Build the full GRC report data dictionary used to render templates.
@@ -307,6 +310,82 @@ def build_grc_report_structure(
 
     heatmap = build_heatmap_matrix(db)
 
+    # ── AI-generated content ──────────────────────────────────────────────────
+    ai_executive_summary = ""
+    ai_roadmap_intro = ""
+    ai_trend_narrative = ""
+    enriched_findings: list[dict] = []
+
+    try:
+        from core.llm_router import LLMRouter
+        router = LLMRouter()
+
+        # Collect all failing rules for enrichment (top 20 by severity)
+        all_failing: list[dict] = []
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        for fw in frameworks:
+            for rule in failing_by_framework.get(fw, []):
+                all_failing.append(rule)
+        seen = set()
+        unique_failing: list[dict] = []
+        for r in sorted(all_failing, key=lambda x: sev_order.get(x.get("severity", "low"), 9)):
+            key = (r.get("name", ""), r.get("platform", ""))
+            if key not in seen:
+                seen.add(key)
+                unique_failing.append(r)
+
+        # Executive summary (DeepSeek — anonymised scores only)
+        fw_scores = {
+            fw: round(
+                sum(scores[p][fw]["passed_rules"] for p in platforms if scores[p][fw]["total_rules"] > 0) /
+                max(sum(scores[p][fw]["passed_rules"] + scores[p][fw]["failed_rules"]
+                        for p in platforms if scores[p][fw]["total_rules"] > 0), 1) * 100
+            )
+            for fw in frameworks
+        }
+        stats_for_ai = {
+            "critical": sum(1 for r in unique_failing if r.get("severity") == "critical"),
+            "high": sum(1 for r in unique_failing if r.get("severity") == "high"),
+            "medium": sum(1 for r in unique_failing if r.get("severity") == "medium"),
+            "top_categories": list({r.get("category", "General") for r in unique_failing[:6]}),
+            "overall_score": overall_score,
+        }
+        ai_executive_summary = router.generate_executive_summary(fw_scores, stats_for_ai)
+
+        # Roadmap intro (DeepSeek — anonymised)
+        ai_roadmap_intro = router.generate(
+            "roadmap_intro",
+            {"total_failing": len(unique_failing), "critical_count": stats_for_ai["critical"],
+             "high_count": stats_for_ai["high"]},
+        )
+
+        # Trend narrative (DeepSeek — anonymised scores)
+        if trend_data:
+            trend_summary = {}
+            for td in trend_data:
+                plat = td["platform"]
+                if plat not in trend_summary:
+                    trend_summary[plat] = []
+                trend_summary[plat].append(td["score"])
+            ai_trend_narrative = router.generate_trend_narrative(trend_summary)
+
+        # Per-finding enrichment (top 10 critical/high)
+        top_findings = [r for r in unique_failing if r.get("severity") in ("critical", "high")][:10]
+        for finding in top_findings:
+            enriched = dict(finding)
+            enriched["ai_remediation"] = router.generate_remediation(finding)
+            enriched["ai_impact"] = router.generate_impact_analysis(finding)
+            enriched["exploitation_scenario"] = router.generate_exploitation_scenario(
+                finding.get("severity", "high"),
+                finding.get("category", "General"),
+                finding.get("name", "Unknown control"),
+            )
+            enriched["ai_source"] = "ollama+deepseek"
+            enriched_findings.append(enriched)
+
+    except Exception as exc:
+        log.warning("build_grc_report_structure AI enrichment failed: %s", exc)
+
     return {
         "title": report_title,
         "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -322,6 +401,13 @@ def build_grc_report_structure(
         "passed_rules": all_passed,
         "failed_rules": all_failed,
         "total_rules": covered,
+        "organisation_name": organisation_name,
+        "report_period_days": report_period_days,
+        "classification": classification,
+        "ai_executive_summary": ai_executive_summary,
+        "ai_roadmap_intro": ai_roadmap_intro,
+        "ai_trend_narrative": ai_trend_narrative,
+        "enriched_findings": enriched_findings,
     }
 
 

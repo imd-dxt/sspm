@@ -1,0 +1,47 @@
+<div class="page-break">
+  <div class="section-title">Executive Summary</div>
+
+  <!-- KPI Strip -->
+  <div class="kpi-strip">
+    <div class="kpi-card overall">
+      <div class="kpi-label">Overall Score</div>
+      <div class="kpi-value overall">{{ overall_score | default(0) }}%</div>
+    </div>
+    <div class="kpi-card critical">
+      <div class="kpi-label">Critical Findings</div>
+      <div class="kpi-value critical">
+        {{ enriched_findings | selectattr('severity', 'equalto', 'critical') | list | length | default(0) }}
+      </div>
+    </div>
+    <div class="kpi-card high">
+      <div class="kpi-label">High Findings</div>
+      <div class="kpi-value high">
+        {{ enriched_findings | selectattr('severity', 'equalto', 'high') | list | length | default(0) }}
+      </div>
+    </div>
+    <div class="kpi-card resolved">
+      <div class="kpi-label">Passing Rules</div>
+      <div class="kpi-value resolved">{{ passed_rules | default(0) }}</div>
+    </div>
+  </div>
+
+  <!-- AI Narrative -->
+  {% if ai_executive_summary %}
+  <div class="ai-narrative">{{ ai_executive_summary }}</div>
+  {% endif %}
+
+  <!-- Key risks callout -->
+  {% set critical_risks = enriched_findings | selectattr('severity', 'equalto', 'critical') | list %}
+  {% set high_risks = enriched_findings | selectattr('severity', 'equalto', 'high') | list %}
+  {% set top_risks = (critical_risks + high_risks)[:3] %}
+  {% if top_risks %}
+  <div class="key-risks-box">
+    <h4>&#9888; Top risks requiring attention:</h4>
+    <ol>
+      {% for r in top_risks %}
+      <li>{{ r.name | default('Unknown') }} ({{ r.platform | default('') | title }}) &mdash; {{ r.severity | upper }}</li>
+      {% endfor %}
+    </ol>
+  </div>
+  {% endif %}
+</div>

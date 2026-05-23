@@ -1,30 +1,140 @@
-{% if heatmap and heatmap.platforms %}
-<div class="section">
-  <div class="section-title">Compliance Heatmap — Framework × Platform</div>
+<div class="page-break">
+  <div class="section-title">Compliance Heatmap &mdash; Control Coverage by Framework &amp; Platform</div>
+  <p style="font-size: 8.5pt; color: #64748b; margin-bottom: 14px;">
+    Each cell shows the percentage of controls passing for that framework &times; platform combination.
+  </p>
+
+  {% if heatmap and heatmap.platforms %}
   <table class="heatmap-table">
     <thead>
       <tr>
-        <th>Platform</th>
-        {% for fw in heatmap.frameworks %}
-        <th>{{ framework_names.get(fw, fw) }}</th>
+        <th class="fw-header" style="width: 140px;">Framework</th>
+        {% for plat in heatmap.platforms %}
+        <th>{{ plat | title }}</th>
         {% endfor %}
+        <th style="background: #162d4a;">Overall</th>
       </tr>
     </thead>
     <tbody>
-      {% for plat in heatmap.platforms %}
+      {% for fw in heatmap.frameworks %}
+      {% set fw_passed = namespace(v=0) %}
+      {% set fw_total = namespace(v=0) %}
       <tr>
-        <td>{{ plat | capitalize }}</td>
-        {% for fw in heatmap.frameworks %}
-          {% set cell = heatmap.matrix.get(plat, {}).get(fw, {}) %}
-          {% if cell.score is not none %}
-            <td class="cell-{{ cell.status }}">{{ cell.score }}%</td>
-          {% else %}
-            <td class="cell-gray">N/A</td>
-          {% endif %}
+        <td style="text-align: left; padding: 10px 12px; font-weight: 600; font-size: 8.5pt; background: #f8fafc; border-right: 2px solid #e2e8f0;">
+          {{ framework_names.get(fw, fw) | default(fw) }}
+        </td>
+        {% for plat in heatmap.platforms %}
+        {% set cell = heatmap.matrix.get(plat, {}).get(fw, {}) %}
+        {% if cell.score is not none %}
+          {% set fw_passed.v = fw_passed.v + cell.get('passed_rules', 0) %}
+          {% set fw_total.v = fw_total.v + cell.get('total_rules', 0) %}
+          {% set cls = 'cell-green' if cell.score >= 80 else ('cell-amber' if cell.score >= 60 else 'cell-red') %}
+          <td class="{{ cls }}">
+            <div class="hm-cell">
+              <div class="hm-score">{{ cell.score }}%</div>
+              <div class="hm-bar" style="width: {{ cell.score }}%;"></div>
+              <div class="hm-sub">{{ cell.get('passed_rules', 0) }}/{{ cell.get('total_rules', 0) }}</div>
+            </div>
+          </td>
+        {% else %}
+          <td class="cell-gray">
+            <div class="hm-cell">
+              <div class="hm-score" style="font-size: 9pt;">N/A</div>
+              <div class="hm-sub">Not assessed</div>
+            </div>
+          </td>
+        {% endif %}
         {% endfor %}
+        <!-- Overall column -->
+        {% if fw_total.v > 0 %}
+        {% set fw_score = (fw_passed.v / fw_total.v * 100) | round | int %}
+        {% set fw_cls = 'cell-green' if fw_score >= 80 else ('cell-amber' if fw_score >= 60 else 'cell-red') %}
+        <td class="{{ fw_cls }} overall-col">
+          <div class="hm-cell">
+            <div class="hm-score">{{ fw_score }}%</div>
+            <div class="hm-bar" style="width: {{ fw_score }}%;"></div>
+          </div>
+        </td>
+        {% else %}
+        <td class="cell-gray overall-col"><div class="hm-cell"><div class="hm-score" style="font-size: 9pt;">N/A</div></div></td>
+        {% endif %}
       </tr>
       {% endfor %}
+
+      <!-- Platform Overall row -->
+      <tr style="border-top: 2px solid #1e3a5f; font-weight: 700;">
+        <td style="text-align: left; padding: 10px 12px; font-weight: 700; background: #f8fafc; border-right: 2px solid #e2e8f0;">
+          Platform Overall
+        </td>
+        {% for plat in heatmap.platforms %}
+        {% set plat_data = heatmap.matrix.get(plat, {}) %}
+        {% set p_passed = namespace(v=0) %}
+        {% set p_total = namespace(v=0) %}
+        {% for fw, cell in plat_data.items() %}
+          {% if cell.score is not none %}
+            {% set p_passed.v = p_passed.v + cell.get('passed_rules', 0) %}
+            {% set p_total.v = p_total.v + cell.get('total_rules', 0) %}
+          {% endif %}
+        {% endfor %}
+        {% if p_total.v > 0 %}
+        {% set p_score = (p_passed.v / p_total.v * 100) | round | int %}
+        {% set p_cls = 'cell-green' if p_score >= 80 else ('cell-amber' if p_score >= 60 else 'cell-red') %}
+        <td class="{{ p_cls }}">
+          <div class="hm-cell"><div class="hm-score">{{ p_score }}%</div></div>
+        </td>
+        {% else %}
+        <td class="cell-gray"><div class="hm-cell"><div class="hm-score" style="font-size: 9pt;">N/A</div></div></td>
+        {% endif %}
+        {% endfor %}
+        <td class="cell-gray overall-col"><div class="hm-cell"><div class="hm-score" style="font-size: 9pt;">&mdash;</div></div></td>
+      </tr>
     </tbody>
   </table>
+
+  <!-- Color legend -->
+  <div class="legend-strip">
+    <div class="legend-item"><div class="legend-dot" style="background: #16a34a;"></div> &ge; 80% Compliant</div>
+    <div class="legend-item"><div class="legend-dot" style="background: #d97706;"></div> 60&ndash;79% Needs work</div>
+    <div class="legend-item"><div class="legend-dot" style="background: #dc2626;"></div> &lt; 60% At risk</div>
+    <div class="legend-item"><div class="legend-dot" style="background: #94a3b8;"></div> Not assessed</div>
+  </div>
+
+  <!-- Critical Gaps -->
+  {% set red_cells = [] %}
+  {% for plat in heatmap.platforms %}
+    {% for fw in heatmap.frameworks %}
+      {% set cell = heatmap.matrix.get(plat, {}).get(fw, {}) %}
+      {% if cell.score is not none and cell.score < 60 %}
+        {% set _ = red_cells.append({'platform': plat, 'framework': fw, 'score': cell.score,
+                                      'failed': cell.get('failed_rules', 0), 'total': cell.get('total_rules', 0)}) %}
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+  {% if red_cells %}
+  <div style="margin-top: 20px;">
+    <div style="font-size: 10pt; font-weight: 600; color: #991b1b; margin-bottom: 8px;">Critical Gaps</div>
+    <table class="gaps-table">
+      <thead>
+        <tr>
+          <th>Platform</th><th>Framework</th><th>Score</th>
+          <th>Failed Controls</th><th>Immediate Action Required</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for gap in red_cells %}
+        <tr>
+          <td>{{ gap.platform | title }}</td>
+          <td>{{ framework_names.get(gap.framework, gap.framework) | default(gap.framework) }}</td>
+          <td style="color: #991b1b; font-weight: 700;">{{ gap.score }}%</td>
+          <td>{{ gap.failed }} of {{ gap.total }}</td>
+          <td>Immediate remediation required &mdash; below 60% threshold</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% else %}
+  <p style="color: #64748b; font-style: italic;">No platform data available yet. Connect platforms and run a scan.</p>
+  {% endif %}
 </div>
-{% endif %}

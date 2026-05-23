@@ -528,6 +528,48 @@ sspm/
 
 ---
 
+## LLM Architecture
+
+The SSPM platform uses a **privacy-first hybrid LLM architecture** that routes AI tasks to the appropriate model based on data sensitivity.
+
+### LLM Router (`core/llm_router.py`)
+
+The `LLMRouter` class orchestrates two LLM backends:
+
+| Provider | Location | Use cases | Data sent |
+|----------|----------|-----------|-----------|
+| **Ollama** (local) | Your server | Remediation steps, Q&A, finding explanations | Raw finding data — never leaves your infrastructure |
+| **DeepSeek** (cloud) | api.deepseek.com | Executive summaries, exploitation scenarios, trend narratives | Anonymised aggregates only |
+
+### Privacy Guarantees
+
+**No sensitive data is ever sent to DeepSeek.** The router enforces this via `sanitise()`, which replaces the following field types with opaque tokens before any cloud API call:
+
+- Usernames, emails, display names
+- Tenant IDs, account IDs, client secrets
+- Organisation names, domain names, internal URLs
+- IP addresses
+
+Token maps are held in memory only for the duration of a single LLM call and are immediately discarded — they are never logged, persisted, or stored in the database.
+
+### Setup
+
+```bash
+# Install local LLM
+ollama pull llama3.2
+
+# Configure environment
+DEEPSEEK_API_KEY=sk-your-key
+OLLAMA_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+LLM_TIMEOUT_OLLAMA=60
+LLM_TIMEOUT_DEEPSEEK=30
+```
+
+If neither Ollama nor DeepSeek is configured, the platform continues to work — AI sections in reports display a placeholder message instead of failing.
+
+---
+
 ## Roadmap
 
 - [x] Salesforce connector (users, profiles, connected apps, org settings)

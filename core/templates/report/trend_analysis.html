@@ -1,29 +1,50 @@
-{% if trend_data %}
-<div class="section">
-  <div class="section-title">Compliance Trend (Last 30 Days)</div>
-  <table class="trend-table">
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Platform</th>
-        <th>Framework</th>
-        <th>Score</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in trend_data[-40:] %}
-      <tr>
-        <td>{{ row.date }}</td>
-        <td>{{ row.platform | capitalize }}</td>
-        <td>{{ row.framework }}</td>
-        <td class="cell-{% if row.score >= 80 %}green{% elif row.score >= 60 %}amber{% else %}red{% endif %}">
-          {{ row.score }}%
-        </td>
-        <td>{% if row.score >= 80 %}&#x2713; Compliant{% elif row.score >= 60 %}&#x26A0; Needs Work{% else %}&#x2717; At Risk{% endif %}</td>
-      </tr>
+<div class="page-break">
+  <div class="section-title">Compliance Trend Analysis</div>
+  <p style="font-size: 8pt; color: #64748b; margin-bottom: 16px;">
+    Showing last 30 days of compliance snapshots per platform.
+  </p>
+
+  {% if ai_trend_narrative %}
+  <div class="ai-narrative">{{ ai_trend_narrative }}</div>
+  {% endif %}
+
+  {% if trend_data %}
+  {% set platforms_seen = [] %}
+  {% for row in trend_data %}
+    {% if row.platform not in platforms_seen %}
+      {% set _ = platforms_seen.append(row.platform) %}
+    {% endif %}
+  {% endfor %}
+
+  {% for plat in platforms_seen %}
+  {% set plat_rows = trend_data | selectattr('platform', 'equalto', plat) | list %}
+  {% set last6 = plat_rows[-6:] %}
+  {% set scores_only = last6 | map(attribute='score') | list %}
+  {% set first_score = scores_only[0] if scores_only else 0 %}
+  {% set last_score = scores_only[-1] if scores_only else 0 %}
+  {% set trend_dir = '&#9650;' if last_score > first_score else ('&#9660;' if last_score < first_score else '&#8594;') %}
+  {% set arrow_cls = 'arrow-up' if last_score > first_score else ('arrow-down' if last_score < first_score else 'arrow-flat') %}
+
+  <div class="trend-platform-row">
+    <div class="trend-platform-label">
+      {{ plat | title }}
+      <span class="trend-arrow {{ arrow_cls }}">{{ trend_dir }}</span>
+      <span style="font-size: 8pt; font-weight: 400; color: #64748b; margin-left: 6px;">
+        Latest: {{ last_score }}%
+      </span>
+    </div>
+    <div class="trend-cells">
+      {% for row in last6 %}
+      {% set cls = 'green' if row.score >= 80 else ('amber' if row.score >= 60 else 'red') %}
+      <div class="trend-cell {{ cls }}">
+        <div>{{ row.score }}%</div>
+        <div style="font-size: 6pt; font-weight: 400;">{{ row.date[5:] | default('') }}</div>
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p style="color: #64748b; font-style: italic;">No trend data available yet. Run multiple scans to populate trend history.</p>
+  {% endif %}
 </div>
-{% endif %}

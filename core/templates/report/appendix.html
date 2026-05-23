@@ -1,0 +1,108 @@
+<div class="page-break">
+  <div class="section-title">Appendix</div>
+
+  <!-- A. Rule Inventory -->
+  <div style="margin-bottom: 20px;">
+    <h4 style="color: #1e3a5f; font-size: 10pt; margin-bottom: 10px;">A. Methodology &amp; Rule Inventory</h4>
+    <table class="appendix-table">
+      <thead>
+        <tr><th>Framework</th><th>Total Rules</th><th>Passing</th><th>Failing</th><th>Coverage</th></tr>
+      </thead>
+      <tbody>
+        {% for fw in frameworks %}
+        {% set fw_pass = namespace(v=0) %}
+        {% set fw_fail = namespace(v=0) %}
+        {% set fw_tot = namespace(v=0) %}
+        {% for plat in platforms %}
+          {% set s = scores.get(plat, {}).get(fw, {}) %}
+          {% if s.get('total_rules', 0) > 0 %}
+            {% set fw_pass.v = fw_pass.v + s.get('passed_rules', 0) %}
+            {% set fw_fail.v = fw_fail.v + s.get('failed_rules', 0) %}
+            {% set fw_tot.v = fw_tot.v + s.get('total_rules', 0) %}
+          {% endif %}
+        {% endfor %}
+        <tr>
+          <td>{{ framework_names.get(fw, fw) | default(fw) }}</td>
+          <td>{{ fw_tot.v }}</td>
+          <td style="color: #166534;">{{ fw_pass.v }}</td>
+          <td style="color: #991b1b;">{{ fw_fail.v }}</td>
+          <td>{% if fw_tot.v > 0 %}{{ (fw_pass.v / fw_tot.v * 100) | round | int }}%{% else %}N/A{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- B. Scan Information -->
+  <div style="margin-bottom: 20px;">
+    <h4 style="color: #1e3a5f; font-size: 10pt; margin-bottom: 10px;">B. Scan Information</h4>
+    <table class="appendix-table">
+      <thead>
+        <tr><th>Platform</th><th>Assessment Date</th><th>Data Source</th></tr>
+      </thead>
+      <tbody>
+        {% for plat in platforms %}
+        <tr>
+          <td>{{ plat | title }}</td>
+          <td>{{ generated_at | default('Current report date') }}</td>
+          <td>Automated API connector</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- C. Glossary -->
+  <div style="margin-bottom: 20px;">
+    <h4 style="color: #1e3a5f; font-size: 10pt; margin-bottom: 10px;">C. Glossary</h4>
+    <div class="glossary-grid">
+      <div><span class="glossary-term">SOC 2 TSC</span> &mdash; Trust Services Criteria (AICPA framework)</div>
+      <div><span class="glossary-term">CIS Benchmark</span> &mdash; Center for Internet Security configuration guides</div>
+      <div><span class="glossary-term">Finding</span> &mdash; Detected deviation from a security control baseline</div>
+      <div><span class="glossary-term">SSPM</span> &mdash; SaaS Security Posture Management</div>
+      <div><span class="glossary-term">MFA</span> &mdash; Multi-Factor Authentication</div>
+      <div><span class="glossary-term">RBAC</span> &mdash; Role-Based Access Control</div>
+      <div><span class="glossary-term">PIM</span> &mdash; Privileged Identity Management</div>
+      <div><span class="glossary-term">OWD</span> &mdash; Organisation-Wide Default (Salesforce sharing model)</div>
+      <div><span class="glossary-term">ISO 27001</span> &mdash; International standard for information security management</div>
+      <div><span class="glossary-term">NIST CSF</span> &mdash; NIST Cybersecurity Framework</div>
+    </div>
+  </div>
+
+  <!-- D. AI Model Attribution -->
+  <div>
+    <h4 style="color: #1e3a5f; font-size: 10pt; margin-bottom: 10px;">D. AI Model Attribution</h4>
+    <table class="appendix-table">
+      <thead>
+        <tr><th>Task</th><th>Model</th><th>Location</th><th>Privacy Level</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Remediation steps</td><td>Ollama (local model)</td>
+          <td>Local server</td><td>Raw data &mdash; never leaves server</td>
+        </tr>
+        <tr>
+          <td>Executive summary</td><td>deepseek-chat</td>
+          <td>Cloud API</td><td>Anonymised aggregates only</td>
+        </tr>
+        <tr>
+          <td>Exploitation scenarios</td><td>deepseek-chat</td>
+          <td>Cloud API</td><td>Generic &mdash; no org data</td>
+        </tr>
+        <tr>
+          <td>Q&amp;A assistant</td><td>Ollama (local model)</td>
+          <td>Local server</td><td>Raw data &mdash; never leaves server</td>
+        </tr>
+        <tr>
+          <td>Trend narrative</td><td>deepseek-chat</td>
+          <td>Cloud API</td><td>Anonymised scores only</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="margin-top: 10px; padding: 10px 14px; background: #f0fdf4; border-radius: 6px; font-size: 8pt; color: #166534; border-left: 3px solid #16a34a;">
+      <strong>Privacy guarantee:</strong> All data sent to the DeepSeek API has been anonymised using
+      token substitution. No personally identifiable information, organisation names, usernames,
+      emails, or IP addresses are transmitted to external services.
+    </div>
+  </div>
+</div>

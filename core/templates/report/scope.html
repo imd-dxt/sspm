@@ -1,0 +1,39 @@
+<div class="page-break">
+  <div class="section-title">Scope and Methodology</div>
+
+  <div class="scope-grid">
+    <div>
+      <h4 style="color: #1e3a5f; margin-bottom: 10px; font-size: 10pt;">Scope of Assessment</h4>
+      <ul style="padding-left: 18px; font-size: 8.5pt; line-height: 2; color: #374151;">
+        <li><strong>Platforms assessed:</strong>
+          {% for p in platforms %}{{ p | title }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </li>
+        <li><strong>Frameworks applied:</strong>
+          {% for f in frameworks %}{{ framework_names.get(f, f) | default(f) }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </li>
+        <li><strong>Total rules evaluated:</strong> {{ total_rules | default(0) }}</li>
+        <li><strong>Assessment period:</strong> Last {{ report_period_days | default(30) }} days</li>
+        <li><strong>Data collection:</strong> Automated API connectors</li>
+        <li><strong>Report generated:</strong> {{ generated_at | default('') }}</li>
+      </ul>
+
+      <div style="margin-top: 16px; padding: 12px; background: #fff7ed; border-radius: 6px; font-size: 8pt; color: #92400e;">
+        <strong>Limitations:</strong><br/>
+        &bull; Rules requiring P1/P2 licenses not evaluated<br/>
+        &bull; Manual controls and physical security not assessed<br/>
+        &bull; Point-in-time assessment as of {{ generated_at | default('report date') }}
+      </div>
+    </div>
+
+    <div class="method-box">
+      <h4>Methodology</h4>
+      <ol>
+        <li>Automated data collection via platform APIs</li>
+        <li>Rule-based detection against CIS / SOC 2 / ISO 27001 / NIST controls</li>
+        <li>Cross-platform identity correlation (graph database)</li>
+        <li>AI-assisted analysis: Ollama (local) + DeepSeek (cloud, anonymised)</li>
+        <li>Risk prioritisation by severity &times; exploitability score</li>
+      </ol>
+    </div>
+  </div>
+</div>

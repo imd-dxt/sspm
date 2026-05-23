@@ -1,0 +1,55 @@
+{% if enriched_findings %}
+<div class="page-break">
+  <div class="section-title">Critical Risks, Exploitation Scenarios &amp; Business Impact</div>
+  <p style="font-size: 8.5pt; color: #64748b; margin-bottom: 16px;">
+    The following findings represent the highest-priority security risks identified during this
+    assessment period. Each risk includes a realistic exploitation scenario and its potential
+    business impact.
+  </p>
+
+  {% for finding in enriched_findings %}
+  {% set sev = finding.severity | lower | default('medium') %}
+  {% set border_color = '#dc2626' if sev == 'critical' else ('#d97706' if sev == 'high' else ('#2563eb' if sev == 'medium' else '#16a34a')) %}
+  <div class="risk-card" style="border-left: 4px solid {{ border_color }};">
+    <div class="risk-card-header" style="background: #f8fafc;">
+      <span class="sev-badge sev-{{ sev }}">{{ sev }}</span>
+      <span style="font-weight: 700; font-size: 9.5pt; color: #1e293b;">
+        {{ finding.name | default('Unknown control') }}
+      </span>
+      <span style="margin-left: auto; font-size: 8pt; color: #64748b;">
+        Platform: {{ finding.platform | title | default('Unknown') }}
+        {% if finding.open_count is defined %} | Open: {{ finding.open_count }} finding(s){% endif %}
+      </span>
+    </div>
+
+    {% if finding.description %}
+    <div class="risk-card-body-section">
+      <div class="risk-section-label">Risk Description</div>
+      <div class="risk-section-text">{{ finding.description }}</div>
+    </div>
+    {% endif %}
+
+    {% if finding.exploitation_scenario %}
+    <div class="risk-card-body-section" style="background: #fff8f8;">
+      <div class="risk-section-label" style="color: #991b1b;">Exploitation Scenario</div>
+      <div class="risk-section-text">{{ finding.exploitation_scenario }}</div>
+    </div>
+    {% endif %}
+
+    {% if finding.ai_impact %}
+    <div class="risk-card-body-section">
+      <div class="risk-section-label">Potential Business Impact</div>
+      <div class="risk-section-text">{{ finding.ai_impact }}</div>
+    </div>
+    {% endif %}
+
+    {% if finding.remediation %}
+    <div class="risk-card-body-section" style="background: #f0fdf4;">
+      <div class="risk-section-label" style="color: #166534;">Recommended Remediation</div>
+      <div class="risk-section-text">{{ finding.ai_remediation | default(finding.remediation) }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}

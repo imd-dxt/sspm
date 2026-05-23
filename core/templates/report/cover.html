@@ -1,0 +1,44 @@
+<div class="cover-page">
+  <span class="confidential-badge">Confidential</span>
+
+  <div style="margin-top: 80px;">
+    <div class="cover-title">Cybersecurity Compliance Report</div>
+    <div class="cover-subtitle">SaaS Security Posture Assessment</div>
+    <hr class="cover-divider" />
+
+    <div class="cover-meta">
+      <div><strong>Prepared for:</strong> {{ organisation_name | default('Your Organisation') }}</div>
+      <div><strong>Report period:</strong> Last {{ report_period_days | default(30) }} days</div>
+      <div><strong>Classification:</strong> {{ classification | default('Confidential') }}</div>
+      <div><strong>Generated:</strong> {{ generated_at | default('') }}</div>
+      <div style="margin-top: 10px;"><strong>Platforms assessed:</strong>
+        {% for p in platforms %}{{ p | title }}{% if not loop.last %} | {% endif %}{% endfor %}
+      </div>
+      <div><strong>Frameworks:</strong>
+        {% for f in frameworks %}{{ framework_names.get(f, f) | default(f) }}{% if not loop.last %} | {% endif %}{% endfor %}
+      </div>
+    </div>
+
+    <hr class="cover-divider" />
+
+    <div style="margin-top: 20px;">
+      <div style="font-size: 9pt; color: #64748b; margin-bottom: 4px;">Overall Compliance Score</div>
+      <div class="overall-score-display score-{{ overall_status | default('amber') }}">
+        {{ overall_score | default(0) }}%
+      </div>
+      <div style="margin-top: 10px;">
+        {% if overall_score | default(0) >= 80 %}
+          <span class="status-badge status-compliant">&#10003; Compliant</span>
+        {% elif overall_score | default(0) >= 60 %}
+          <span class="status-badge status-partial">&#9888; Partially Compliant</span>
+        {% else %}
+          <span class="status-badge status-non-compliant">&#10007; Non-Compliant</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top: auto; padding-top: 40px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8;">
+    SSPM Platform &mdash; Automated Security Posture Assessment
+  </div>
+</div>

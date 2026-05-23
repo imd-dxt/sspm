@@ -49,6 +49,16 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     deepseek_base_url: str = "https://api.deepseek.com"
 
+    # ── Ollama LLM ────────────────────────────────────────────────────────────
+    ollama_url: str = "http://ollama:11434"
+    ollama_model: str = "llama3.2"
+    ollama_enabled: bool = True
+
+    # ── LLM timeouts ──────────────────────────────────────────────────────────
+    llm_timeout_ollama: int = 60
+    llm_timeout_deepseek: int = 30
+    llm_fallback_to_template: bool = True
+
     # ── Rate limiting ─────────────────────────────────────────────────────────
     # Default requests/second for connectors that don't set their own limit
     default_rate_limit_rps: float = 5.0

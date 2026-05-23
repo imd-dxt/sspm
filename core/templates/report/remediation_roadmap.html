@@ -1,25 +1,70 @@
-{% set sev_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3} %}
-{% set all_failing = [] %}
-{% for fw in frameworks %}
-  {% for rule in failing_by_framework.get(fw, []) %}
-    {% set _ = all_failing.append(rule) %}
-  {% endfor %}
-{% endfor %}
-{% set sorted_failing = all_failing | sort(attribute='severity') %}
+<div class="page-break">
+  <div class="section-title">Remediation Roadmap</div>
 
-{% if sorted_failing %}
-<div class="section">
-  <div class="section-title">Remediation Roadmap — Top Failing Controls</div>
-  {% for rule in sorted_failing[:10] %}
-    {% set sev = rule.severity | lower %}
-    <div class="remediation-item" style="border-left-color: {% if sev == 'critical' %}#dc2626{% elif sev == 'high' %}#d97706{% elif sev == 'medium' %}#f59e0b{% else %}#16a34a{% endif %}">
-      <span class="sev sev-{{ sev }}">{{ sev }}</span>
-      <div class="rule-name">{{ loop.index }}. {{ rule.name }}</div>
-      {% if rule.remediation %}
-      <div class="rule-text">{{ rule.remediation }}</div>
-      {% endif %}
-      <div class="platform-tag">Platform: {{ rule.platform }}  ·  Open findings: {{ rule.open_count }}</div>
-    </div>
+  {% if ai_roadmap_intro %}
+  <div class="ai-narrative">{{ ai_roadmap_intro }}</div>
+  {% endif %}
+
+  {% set sev_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3} %}
+  {% set all_failing = [] %}
+  {% for fw in frameworks %}
+    {% for rule in failing_by_framework.get(fw, []) %}
+      {% set _ = all_failing.append(rule) %}
+    {% endfor %}
   {% endfor %}
+  {% set sorted_failing = all_failing | sort(attribute='severity') %}
+
+  {% if sorted_failing %}
+  <table class="remediation-table">
+    <thead>
+      <tr>
+        <th style="width: 40px;">P#</th>
+        <th>Finding</th>
+        <th style="width: 80px;">Platform</th>
+        <th style="width: 60px;">Severity</th>
+        <th style="width: 55px;">Effort</th>
+        <th style="width: 50px;">SLA</th>
+        <th style="width: 70px;">Open</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rule in sorted_failing[:20] %}
+      {% set sev = rule.severity | lower | default('medium') %}
+      {% set priority = loop.index %}
+      {% set sla = '7d' if sev == 'critical' else ('30d' if sev == 'high' else ('90d' if sev == 'medium' else '180d')) %}
+      {% set effort = 'Low' if sev == 'low' else ('Medium' if sev == 'medium' else 'High') %}
+      <tr>
+        <td>
+          <span class="priority-badge {% if priority > 5 %}priority-med{% endif %} {% if priority > 10 %}priority-low{% endif %}">
+            P{{ priority }}
+          </span>
+        </td>
+        <td>
+          <div style="font-weight: 600; font-size: 8.5pt;">{{ rule.name | default('Unknown') }}</div>
+          {% set enriched = enriched_findings | selectattr('name', 'equalto', rule.name) | list %}
+          {% if enriched and enriched[0].ai_remediation %}
+          <div style="font-size: 7.5pt; color: #374151; margin-top: 4px; padding-top: 4px; border-top: 1px solid #f1f5f9;">
+            {{ enriched[0].ai_remediation | truncate(200) }}
+          </div>
+          {% elif rule.remediation %}
+          <div style="font-size: 7.5pt; color: #6b7280; margin-top: 3px;">{{ rule.remediation | truncate(120) }}</div>
+          {% endif %}
+        </td>
+        <td>{{ rule.platform | title | default('&mdash;') }}</td>
+        <td><span class="sev-badge sev-{{ sev }}">{{ sev }}</span></td>
+        <td style="font-size: 8pt;">{{ effort }}</td>
+        <td style="font-size: 8pt; font-weight: 600;">{{ sla }}</td>
+        <td style="font-size: 8pt; text-align: center;">{{ rule.open_count | default(0) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div style="margin-top: 12px; font-size: 7.5pt; color: #64748b;">
+    <strong>Effort legend:</strong> Low = &lt;4 hours | Medium = 1&ndash;3 days | High = &gt;3 days &nbsp;|&nbsp;
+    <strong>SLA:</strong> Critical = 7 days | High = 30 days | Medium = 90 days | Low = 180 days
+  </div>
+  {% else %}
+  <p style="color: #64748b; font-style: italic;">No failing controls detected &mdash; all assessed controls are passing.</p>
+  {% endif %}
 </div>
-{% endif %}

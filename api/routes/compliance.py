@@ -117,8 +117,21 @@ class TrendPoint(BaseModel):
 
 
 class GenerateReportRequest(BaseModel):
-    platform: str
-    framework: str
+    title: str = "SSPM Compliance Report"
+    platforms: list[str] | None = None        # None = all connected
+    frameworks: list[str] | None = None       # None = all frameworks
+    include_ai_narrative: bool = True
+    include_exploitation_scenarios: bool = True
+    include_impact_analysis: bool = True
+    ai_provider_executive: str = "deepseek"
+    ai_provider_remediation: str = "ollama"
+    report_period_days: int = 30
+    classification: str = "Confidential"
+    output_format: str = "pdf"
+    organisation_name: str = "Your Organisation"
+    # Legacy compat
+    platform: str = "all"
+    framework: str = "SOC2"
     with_ai_narrative: bool = True
 
 
@@ -380,33 +393,38 @@ async def generate_report(req: GenerateReportRequest, db: DB) -> StoredReport:
     """Generate a compliance report. Use platform='all' to aggregate all connected platforms."""
     engine = ComplianceEngine()
 
-    # Resolve platforms — "all" aggregates every connected connector
-    if req.platform == "all":
+    # Resolve platforms — use new-style `platforms` list if provided, else legacy `platform` field
+    if req.platforms:
+        platforms = req.platforms
+    elif req.platform == "all":
         platforms = [
             row[0] for row in db.query(distinct(Connector.platform_name))
             .filter(Connector.connection_ok.is_(True)).all()
         ]
         if not platforms:
             raise HTTPException(status_code=400, detail="No connected platforms found")
-        total_rules = passed_rules = failed_rules = 0
-        for plat in platforms:
-            r = engine.calculate_score(plat, req.framework, db)
+    else:
+        platforms = [req.platform]
+
+    # Resolve frameworks — use new-style `frameworks` list if provided, else legacy `framework` field
+    selected_frameworks = req.frameworks or [req.framework]
+
+    total_rules = passed_rules = failed_rules = 0
+    for plat in platforms:
+        for fw in selected_frameworks:
+            r = engine.calculate_score(plat, fw, db)
             total_rules += r["total_rules"]
             passed_rules += r["passed_rules"]
             failed_rules += r["failed_rules"]
-        covered = passed_rules + failed_rules
-        agg_score = round((passed_rules / covered) * 100) if covered > 0 else 100
-        result = {"score": agg_score, "total_rules": total_rules, "passed_rules": passed_rules, "failed_rules": failed_rules}
-        platforms_label = ", ".join(platforms)
-    else:
-        platforms = [req.platform]
-        result = engine.calculate_score(req.platform, req.framework, db)
-        platforms_label = req.platform
+    covered = passed_rules + failed_rules
+    agg_score = round((passed_rules / covered) * 100) if covered > 0 else 100
+    result = {"score": agg_score, "total_rules": total_rules, "passed_rules": passed_rules, "failed_rules": failed_rules}
+    platforms_label = ", ".join(platforms)
 
     failing_rules_info = _collect_failing_rules(platforms, req.framework, db)
 
     narrative: str | None = None
-    if req.with_ai_narrative:
+    if req.with_ai_narrative or req.include_ai_narrative:
         try:
             from core.llm_ollama import _generate
             fw_name = FRAMEWORKS.get(req.framework, {}).get("name", req.framework)
@@ -457,6 +475,14 @@ def get_heatmap(db: DB) -> dict:
     """Return the framework × platform compliance score matrix."""
     from core.compliance_engine import build_heatmap_matrix
     return build_heatmap_matrix(db)
+
+
+@router.get("/ai-status")
+def get_ai_status() -> dict:
+    """Return availability and routing status for Ollama and DeepSeek."""
+    from core.llm_router import LLMRouter
+    llm_router = LLMRouter()
+    return llm_router.check_status()
 
 
 @router.delete("/reports/{report_id}")

@@ -2,223 +2,214 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>{{ title }}</title>
+  <title>{{ title | default('SSPM Compliance Report') }}</title>
   <style>
     @page {
       size: A4;
-      margin: 18mm 14mm 18mm 14mm;
+      margin: 2.2cm;
       @bottom-center {
-        content: "SSPM Security Posture Report  ·  Page " counter(page) " of " counter(pages);
+        content: "CONFIDENTIAL  |  SSPM Platform  |  Page " counter(page) " of " counter(pages);
         font-size: 7pt;
-        color: #6b7280;
+        color: #64748b;
+        font-family: Arial, Helvetica, sans-serif;
       }
     }
-
     * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #1e293b; line-height: 1.55; }
 
-    body {
-      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      font-size: 9pt;
-      color: #1e293b;
-      line-height: 1.5;
+    /* Colors */
+    :root {
+      --navy: #1e3a5f;
+      --red: #dc2626;
+      --amber: #d97706;
+      --green: #16a34a;
+      --blue: #2563eb;
     }
 
-    /* ── Cover strip ── */
-    .cover-header {
-      background: #0d1117;
-      color: #fff;
-      padding: 20px 22px 16px;
-      border-bottom: 3px solid #4f7df7;
-      margin-bottom: 14px;
-    }
-    .cover-header h1 { font-size: 16pt; font-weight: 700; margin-bottom: 4px; }
-    .cover-header p  { font-size: 8pt; color: #9ca3af; }
-
-    /* ── Score band ── */
-    .score-band {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      background: #f8fafc;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 14px 20px;
-      margin-bottom: 18px;
-    }
-    .score-circle {
-      font-size: 30pt;
-      font-weight: 800;
-      line-height: 1;
-    }
-    .score-green  { color: #16a34a; }
-    .score-amber  { color: #d97706; }
-    .score-red    { color: #dc2626; }
-
-    .score-meta { flex: 1; }
-    .score-meta .label { font-size: 7pt; text-transform: uppercase; letter-spacing: .05em; color: #64748b; }
-    .score-meta .value { font-size: 9pt; font-weight: 600; }
-
-    .badge {
-      display: inline-block;
-      padding: 4px 12px;
-      border-radius: 20px;
-      font-size: 8pt;
-      font-weight: 700;
-      text-transform: uppercase;
-    }
-    .badge-green  { background: #dcfce7; color: #15803d; }
-    .badge-amber  { background: #fef3c7; color: #b45309; }
-    .badge-red    { background: #fee2e2; color: #b91c1c; }
-
-    /* ── Sections ── */
-    .section { margin-bottom: 20px; page-break-inside: avoid; }
+    /* Section titles */
     .section-title {
-      font-size: 10pt;
-      font-weight: 700;
-      color: #0d1117;
-      border-left: 3px solid #4f7df7;
-      padding-left: 8px;
-      margin-bottom: 10px;
+      font-size: 14pt; font-weight: 700; color: var(--navy);
+      border-bottom: 2px solid var(--navy); padding-bottom: 6px; margin-bottom: 16px;
     }
-
-    /* ── Executive narrative ── */
-    .narrative p { font-size: 9pt; color: #374151; margin-bottom: 8px; line-height: 1.6; }
-
-    /* ── Heatmap table ── */
-    .heatmap-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 8.5pt;
-    }
-    .heatmap-table th {
-      background: #0d1117;
-      color: #fff;
-      padding: 5px 8px;
-      text-align: center;
-      font-weight: 600;
-    }
-    .heatmap-table th:first-child { text-align: left; }
-    .heatmap-table td {
-      padding: 5px 8px;
-      border-bottom: 1px solid #e2e8f0;
-      text-align: center;
-    }
-    .heatmap-table td:first-child { text-align: left; font-weight: 500; }
-    .heatmap-table tr:nth-child(even) td { background: #f8fafc; }
-    .cell-green { color: #15803d; font-weight: 700; }
-    .cell-amber { color: #b45309; font-weight: 700; }
-    .cell-red   { color: #b91c1c; font-weight: 700; }
-    .cell-gray  { color: #9ca3af; }
-
-    /* ── Remediation list ── */
-    .remediation-item {
-      padding: 8px 10px;
-      border-left: 3px solid #e2e8f0;
-      margin-bottom: 8px;
-      background: #f8fafc;
-      border-radius: 0 6px 6px 0;
-    }
-    .remediation-item .sev {
-      display: inline-block;
-      padding: 1px 7px;
-      border-radius: 10px;
-      font-size: 7pt;
-      font-weight: 700;
-      text-transform: uppercase;
-      margin-bottom: 3px;
-    }
-    .sev-critical { background: #fee2e2; color: #b91c1c; border-left-color: #dc2626; }
-    .sev-high     { background: #fef3c7; color: #b45309; border-left-color: #d97706; }
-    .sev-medium   { background: #fffbeb; color: #92400e; border-left-color: #f59e0b; }
-    .sev-low      { background: #dcfce7; color: #15803d; border-left-color: #16a34a; }
-    .remediation-item .rule-name { font-size: 9pt; font-weight: 600; margin-bottom: 2px; }
-    .remediation-item .rule-text { font-size: 8pt; color: #4b5563; }
-    .remediation-item .platform-tag { font-size: 7pt; color: #6b7280; margin-top: 2px; }
-
-    /* ── GRC context ── */
-    .grc-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    .grc-card {
-      padding: 10px 12px;
-      border: 1px solid #e2e8f0;
-      border-radius: 6px;
-      background: #f8fafc;
-    }
-    .grc-card h4 { font-size: 8.5pt; font-weight: 700; margin-bottom: 4px; color: #0d1117; }
-    .grc-card p  { font-size: 7.5pt; color: #4b5563; line-height: 1.5; }
-
-    /* ── Trend table ── */
-    .trend-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 8pt;
-    }
-    .trend-table th {
-      background: #f1f5f9;
-      color: #475569;
-      padding: 4px 8px;
-      text-align: left;
-      border-bottom: 1px solid #e2e8f0;
-      font-weight: 600;
-    }
-    .trend-table td {
-      padding: 4px 8px;
-      border-bottom: 1px solid #f1f5f9;
-    }
-
-    /* ── Page break helpers ── */
+    .section { margin-bottom: 24px; }
     .page-break { page-break-before: always; }
+
+    /* KPI strip */
+    .kpi-strip { display: flex; gap: 12px; margin-bottom: 20px; }
+    .kpi-card { flex: 1; border-radius: 8px; padding: 14px; }
+    .kpi-card.overall { background: #eff6ff; border: 1px solid #bfdbfe; }
+    .kpi-card.critical { background: #fee2e2; border: 1px solid #fca5a5; }
+    .kpi-card.high { background: #fef3c7; border: 1px solid #fcd34d; }
+    .kpi-card.resolved { background: #dcfce7; border: 1px solid #86efac; }
+    .kpi-label { font-size: 7pt; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+    .kpi-value { font-size: 22pt; font-weight: 700; margin-top: 4px; }
+    .kpi-value.overall { color: var(--blue); }
+    .kpi-value.critical { color: var(--red); }
+    .kpi-value.high { color: var(--amber); }
+    .kpi-value.resolved { color: var(--green); }
+
+    /* Heatmap table */
+    .heatmap-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+    .heatmap-table th {
+      background: var(--navy); color: #fff; font-weight: 600;
+      padding: 10px 8px; text-align: center; font-size: 8pt;
+    }
+    .heatmap-table td { padding: 0; text-align: center; border: 1px solid #e2e8f0; }
+    .hm-cell { padding: 10px 6px; }
+    .hm-score { font-size: 16pt; font-weight: 700; line-height: 1; }
+    .hm-sub { font-size: 7pt; color: #6b7280; margin-top: 3px; }
+    .hm-bar { height: 4px; border-radius: 2px; margin: 5px auto 0; width: 80%; }
+    .cell-green { background: #dcfce7; }
+    .cell-green .hm-score { color: #166534; }
+    .cell-green .hm-bar { background: #16a34a; }
+    .cell-amber { background: #fef3c7; }
+    .cell-amber .hm-score { color: #92400e; }
+    .cell-amber .hm-bar { background: #d97706; }
+    .cell-red { background: #fee2e2; }
+    .cell-red .hm-score { color: #991b1b; }
+    .cell-red .hm-bar { background: #dc2626; }
+    .cell-gray { background: #f1f5f9; }
+    .cell-gray .hm-score { color: #64748b; }
+    .heatmap-table .fw-header { text-align: left; padding-left: 12px; }
+    .overall-col { background: #1e3a5f22; font-weight: 700; }
+
+    /* Risk cards */
+    .risk-card {
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      margin-bottom: 16px; page-break-inside: avoid; overflow: hidden;
+    }
+    .risk-card-header {
+      padding: 10px 14px; display: flex; align-items: center; gap: 10px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .risk-card-body-section { padding: 10px 14px; border-bottom: 1px solid #f1f5f9; }
+    .risk-card-body-section:last-child { border-bottom: none; }
+    .risk-section-label {
+      font-size: 7pt; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #64748b; margin-bottom: 4px;
+    }
+    .risk-section-text { font-size: 8.5pt; color: #374151; line-height: 1.5; }
+    .sev-badge {
+      font-size: 7pt; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .sev-critical { background: #fee2e2; color: #991b1b; }
+    .sev-high { background: #fef3c7; color: #92400e; }
+    .sev-medium { background: #eff6ff; color: #1e40af; }
+    .sev-low { background: #f0fdf4; color: #166534; }
+
+    /* Remediation table */
+    .remediation-table { width: 100%; border-collapse: collapse; font-size: 8pt; }
+    .remediation-table th {
+      background: #f8fafc; color: #374151; font-weight: 600;
+      padding: 8px 10px; text-align: left; border-bottom: 2px solid #e2e8f0;
+      font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .remediation-table td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .remediation-table tr:nth-child(even) td { background: #f8fafc; }
+    .priority-badge {
+      font-size: 7pt; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+      background: var(--red); color: white;
+    }
+    .priority-med { background: var(--amber); }
+    .priority-low { background: #94a3b8; }
+
+    /* Executive summary narrative */
+    .ai-narrative {
+      border-left: 3px solid var(--navy); padding: 12px 16px;
+      background: #f8fafc; font-style: italic; font-size: 9pt;
+      color: #374151; line-height: 1.6; margin: 16px 0; border-radius: 0 6px 6px 0;
+    }
+
+    /* Key risks callout */
+    .key-risks-box {
+      background: var(--navy); color: white; border-radius: 8px;
+      padding: 16px 20px; margin: 16px 0;
+    }
+    .key-risks-box h4 { font-size: 10pt; margin-bottom: 10px; }
+    .key-risks-box ol { padding-left: 20px; font-size: 9pt; line-height: 1.8; }
+
+    /* Trend table */
+    .trend-platform-row { margin-bottom: 14px; }
+    .trend-platform-label { font-weight: 600; font-size: 9pt; margin-bottom: 5px; }
+    .trend-cells { display: flex; gap: 4px; align-items: center; }
+    .trend-cell {
+      width: 52px; height: 36px; border-radius: 4px; display: flex;
+      flex-direction: column; align-items: center; justify-content: center;
+      font-size: 7.5pt; font-weight: 700; flex-shrink: 0;
+    }
+    .trend-cell.green { background: #dcfce7; color: #166534; }
+    .trend-cell.amber { background: #fef3c7; color: #92400e; }
+    .trend-cell.red { background: #fee2e2; color: #991b1b; }
+    .trend-arrow { font-size: 10pt; font-weight: 700; margin-left: 8px; }
+    .arrow-up { color: var(--green); }
+    .arrow-down { color: var(--red); }
+    .arrow-flat { color: #94a3b8; }
+
+    /* Appendix */
+    .appendix-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-bottom: 16px; }
+    .appendix-table th { background: #f8fafc; padding: 7px 10px; text-align: left; border-bottom: 2px solid #e2e8f0; font-size: 7.5pt; }
+    .appendix-table td { padding: 7px 10px; border-bottom: 1px solid #f1f5f9; }
+    .glossary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; font-size: 8.5pt; }
+    .glossary-term { font-weight: 600; color: var(--navy); }
+
+    /* Scope */
+    .scope-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .method-box { border: 1px solid var(--navy); border-radius: 6px; padding: 14px; }
+    .method-box h4 { color: var(--navy); font-size: 9pt; margin-bottom: 8px; }
+    .method-box ol { padding-left: 18px; font-size: 8.5pt; line-height: 1.8; }
+
+    /* Cover */
+    .cover-page { min-height: 100vh; display: flex; flex-direction: column; }
+    .confidential-badge {
+      display: inline-block; background: var(--red); color: white;
+      font-size: 7pt; font-weight: 700; padding: 3px 10px; border-radius: 10px;
+      text-transform: uppercase; letter-spacing: 0.1em; align-self: flex-end;
+    }
+    .cover-title { font-size: 28pt; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+    .cover-subtitle { font-size: 14pt; color: #64748b; margin-bottom: 30px; }
+    .cover-divider { border: none; border-top: 2px solid var(--navy); margin: 20px 0; }
+    .cover-meta { font-size: 9pt; line-height: 2; color: #374151; }
+    .cover-meta strong { color: var(--navy); }
+    .overall-score-display { font-size: 48pt; font-weight: 700; }
+    .score-green { color: var(--green); }
+    .score-amber { color: var(--amber); }
+    .score-red { color: var(--red); }
+    .status-badge {
+      display: inline-block; padding: 4px 16px; border-radius: 20px;
+      font-size: 10pt; font-weight: 700;
+    }
+    .status-compliant { background: #dcfce7; color: #166534; }
+    .status-partial { background: #fef3c7; color: #92400e; }
+    .status-non-compliant { background: #fee2e2; color: #991b1b; }
+
+    /* Color legend */
+    .legend-strip { display: flex; gap: 16px; margin: 12px 0; font-size: 8pt; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-dot { width: 12px; height: 12px; border-radius: 2px; }
+
+    /* GRC framework cards */
+    .grc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .grc-card { border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; }
+    .grc-card h4 { color: var(--navy); font-size: 9pt; margin-bottom: 6px; }
+    .grc-card p { font-size: 8pt; line-height: 1.5; color: #374151; }
+
+    /* Critical gaps table */
+    .gaps-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-top: 16px; }
+    .gaps-table th { background: #fee2e2; color: #991b1b; padding: 7px 10px; text-align: left; font-size: 7.5pt; }
+    .gaps-table td { padding: 7px 10px; border-bottom: 1px solid #fee2e2; background: #fff5f5; }
   </style>
 </head>
 <body>
 
-  <!-- Cover header -->
-  <div class="cover-header">
-    <h1>{{ title }}</h1>
-    <p>Generated {{ generated_at }}  ·  Platforms: {{ platforms | join(', ') }}  ·  Frameworks: {{ frameworks | join(', ') }}</p>
-  </div>
-
-  <!-- Score band -->
-  <div class="score-band">
-    <div class="score-circle score-{{ overall_status }}">{{ overall_score }}%</div>
-    <div class="score-meta">
-      <div class="label">Overall Compliance Score</div>
-      <div class="value">{{ passed_rules }} / {{ total_rules }} controls passing · {{ failed_rules }} failing</div>
-    </div>
-    <span class="badge badge-{{ overall_status }}">
-      {% if overall_status == 'green' %}Compliant{% elif overall_status == 'amber' %}Needs Work{% else %}At Risk{% endif %}
-    </span>
-  </div>
-
-  <!-- Heatmap -->
-  {% include 'heatmap.html' %}
-
-  <!-- Executive Summary (AI narrative if present) -->
-  {% if narrative is defined and narrative %}
-  <div class="section">
-    <div class="section-title">Executive Summary</div>
-    <div class="narrative">
-      {% for para in narrative.split('\n') %}
-        {% if para.strip() %}<p>{{ para.strip() }}</p>{% endif %}
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- GRC Framework Context -->
-  {% include 'framework_section.html' %}
-
-  <!-- Remediation Roadmap -->
-  {% include 'remediation_roadmap.html' %}
-
-  <!-- Trend Analysis -->
-  {% if trend_data %}
-  <div class="page-break"></div>
-  {% include 'trend_analysis.html' %}
-  {% endif %}
+{% include 'cover.html' %}
+{% include 'executive_summary.html' %}
+{% include 'scope.html' %}
+{% include 'heatmap.html' %}
+{% include 'risks_and_impacts.html' %}
+{% include 'remediation_roadmap.html' %}
+{% include 'trend_analysis.html' %}
+{% include 'appendix.html' %}
 
 </body>
 </html>
