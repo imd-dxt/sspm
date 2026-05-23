@@ -522,33 +522,24 @@ def download_report_pdf(report_id: int, db: DB) -> Response:
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    # Fetch failing rules for PDF remediation + heatmap sections
-    failing_rules_info: list[dict] = []
-    try:
-        all_rules = db.query(Rule).filter(Rule.platform == report.platform, Rule.is_active.is_(True)).all()
-        if report.framework == "CIS":
-            fw_rules = [r for r in all_rules if r.id.startswith("CIS-")]
-        else:
-            prefix = FRAMEWORKS.get(report.framework, {}).get("prefix", "")
-            fw_rules = [r for r in all_rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
-        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        for rule in fw_rules:
-            open_count = db.query(Finding).filter(
-                Finding.rule_id == rule.id, Finding.platform == report.platform, Finding.status == "open"
-            ).count()
-            if open_count > 0:
-                failing_rules_info.append({
-                    "name": rule.name,
-                    "severity": rule.severity or "medium",
-                    "category": rule.category or "General",
-                    "remediation": rule.remediation or "",
-                    "open_count": open_count,
-                })
-        failing_rules_info.sort(key=lambda r: sev_order.get(r["severity"].lower(), 99))
-    except Exception as exc:
-        log.warning("download_report_pdf: could not fetch failing rules: %s", exc)
+    from core.compliance_engine import build_grc_report_structure, generate_pdf_report
 
-    pdf_bytes = _build_pdf(report, failing_rules_info)
+    platforms = getattr(report, "platforms_assessed", None) or (
+        None if report.platform == "all" else [report.platform]
+    )
+    frameworks = getattr(report, "frameworks_assessed", None) or [report.framework]
+    title = getattr(report, "report_title", None) or f"Compliance Report — {report.framework}"
+
+    report_data = build_grc_report_structure(
+        db,
+        selected_platforms=platforms,
+        selected_frameworks=frameworks,
+        report_title=title,
+    )
+    if report.ai_narrative and not report_data.get("ai_executive_summary"):
+        report_data["ai_executive_summary"] = report.ai_narrative
+
+    pdf_bytes = generate_pdf_report(report_data)
     filename = f"compliance_{report.platform}_{report.framework}_{report_id}.pdf"
     return Response(
         content=pdf_bytes,
@@ -558,7 +549,7 @@ def download_report_pdf(report_id: int, db: DB) -> Response:
 
 
 @router.get("/report/full-posture")
-async def download_full_posture_report(db: DB) -> Response:
+def download_full_posture_report(db: DB) -> Response:
     """Download a comprehensive PDF covering all frameworks × all connected platforms."""
     connected_platforms = [
         row[0] for row in db.query(distinct(Connector.platform_name))
@@ -567,46 +558,14 @@ async def download_full_posture_report(db: DB) -> Response:
     if not connected_platforms:
         raise HTTPException(status_code=400, detail="No connected platforms found")
 
-    engine = ComplianceEngine()
-    platform_scores: dict[str, list[dict]] = {}
-    for plat in connected_platforms:
-        platform_scores[plat] = []
-        for fw in FRAMEWORKS:
-            r = engine.calculate_score(plat, fw, db)
-            if r["total_rules"] > 0:
-                platform_scores[plat].append({**r, "framework_name": FRAMEWORKS[fw]["name"]})
+    from core.compliance_engine import build_grc_report_structure, generate_pdf_report
 
-    # Collect all failing controls across every framework, deduped by name+platform
-    all_failing: list[dict] = []
-    seen_keys: set[tuple[str, str]] = set()
-    for fw in FRAMEWORKS:
-        for rule in _collect_failing_rules(connected_platforms, fw, db):
-            key = (rule["name"], rule.get("platform", ""))
-            if key not in seen_keys:
-                seen_keys.add(key)
-                all_failing.append(rule)
-
-    narrative: str | None = None
-    try:
-        from core.llm_ollama import _generate
-        ctx = "\n".join(
-            f"- [{r.get('platform', '')}] {r['name']} ({r['severity']})"
-            for r in all_failing[:6]
-        ) or "None"
-        prompt = (
-            f"You are a GRC expert. Write a 3-paragraph executive summary for a full security posture report "
-            f"covering {len(connected_platforms)} connected platform(s): {', '.join(connected_platforms)}.\n\n"
-            f"Top failing controls across all frameworks:\n{ctx}\n\n"
-            f"Paragraph 1: Overall security posture and multi-platform coverage. "
-            f"Paragraph 2: Highest-priority remediations needed. "
-            f"Paragraph 3: CIA triad exposure across platforms. "
-            f"Professional tone, under 180 words, no bullets."
-        )
-        narrative = await asyncio.wait_for(_generate(prompt), timeout=30.0)
-    except Exception as exc:
-        log.warning("full_posture narrative failed: %s", exc)
-
-    pdf_bytes = _build_full_posture_pdf(connected_platforms, platform_scores, all_failing, narrative)
+    report_data = build_grc_report_structure(
+        db,
+        selected_platforms=connected_platforms,
+        report_title="Full Security Posture Report",
+    )
+    pdf_bytes = generate_pdf_report(report_data)
     today = datetime.now(timezone.utc).strftime("%Y%m%d")
     return Response(
         content=pdf_bytes,
