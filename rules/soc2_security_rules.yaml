@@ -1,0 +1,1780 @@
+---
+# SOC 2 Security Detection Rules
+# Based on: AICPA Trust Services Criteria (TSC) 2017 (Updated 2022)
+# Covers all 5 Trust Service Categories:
+#   CC - Common Criteria (Security) — mandatory
+#   A  - Availability
+#   PI - Processing Integrity
+#   C  - Confidentiality
+#   P  - Privacy
+#
+# Platform: cross-platform (github, jira, salesforce, entraid)
+# Total Rules: 60
+# Compliance mapping uses TSC control identifiers (e.g. CC6.1, A1.2)
+# ============================================================================
+
+rules:
+
+  # ==========================================================================
+  # CATEGORY 1: CC1 — CONTROL ENVIRONMENT
+  # Tone at the top, organizational structure, commitment to competence
+  # ==========================================================================
+
+  - id: SOC2-CC1-001
+    name: No Defined Security Policy Documented
+    platform: cross-platform
+    severity: high
+    category: control_environment
+    tsc_criteria: CC1.1
+    tsc_description: >
+      The entity demonstrates a commitment to integrity and ethical values.
+      A formal security policy must exist, be approved by leadership,
+      and be communicated to all personnel.
+    description: >
+      No documented information security policy has been detected across
+      connected platforms. SOC 2 CC1.1 requires entities to demonstrate
+      a commitment to integrity through formal, approved policies.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE NOT EXISTS(org.security_policy_url)
+        AND NOT EXISTS(org.security_policy_documented)
+      RETURN org.name as organization,
+             org.platform as platform,
+             'No security policy reference found' as finding
+    remediation: |
+      1. Draft a formal Information Security Policy covering:
+         - Access control requirements
+         - Data classification and handling
+         - Incident response procedures
+         - Acceptable use standards
+      2. Get written approval from executive leadership (CISO / CEO)
+      3. Publish the policy to all staff (intranet, HRIS, or LMS)
+      4. Require annual acknowledgment from all employees
+      5. Reference the policy URL in each connected platform's admin settings
+    compliance_mapping:
+      - SOC2-TSC: CC1.1
+      - ISO27001: A.5.1.1
+      - NIST-800-53: PL-1
+    references:
+      - "AICPA TSC 2017: CC1.1 — COSO Principle 1"
+
+  - id: SOC2-CC1-002
+    name: No Defined Roles and Responsibilities for Security
+    platform: cross-platform
+    severity: medium
+    category: control_environment
+    tsc_criteria: CC1.3
+    description: >
+      SOC 2 CC1.3 requires the entity to establish organizational structures,
+      reporting lines, and appropriate authorities. Security roles (CISO, data
+      owner, system administrator) must be formally assigned and documented.
+    detection_query: |
+      MATCH (u:User)
+      WHERE u.is_active = true
+        AND NOT EXISTS(u.security_role)
+        AND u.platform IN ['entraid', 'salesforce']
+      WITH count(u) as users_without_role
+      WHERE users_without_role > 5
+      RETURN users_without_role,
+             'Active users have no defined security role' as finding
+    remediation: |
+      1. Define security roles: data owner, system admin, security officer,
+         auditor, end user
+      2. Assign roles to all active users in connected platforms
+      3. Document role responsibilities in a RACI matrix
+      4. Review role assignments quarterly
+    compliance_mapping:
+      - SOC2-TSC: CC1.3
+      - ISO27001: A.6.1.1
+      - NIST-800-53: AC-5
+    references:
+      - "AICPA TSC 2017: CC1.3 — COSO Principle 3"
+
+  - id: SOC2-CC1-003
+    name: No Background Check Process for Privileged Users
+    platform: cross-platform
+    severity: medium
+    category: control_environment
+    tsc_criteria: CC1.4
+    description: >
+      CC1.4 requires the entity to demonstrate commitment to attracting,
+      developing, and retaining competent individuals. Privileged users
+      with admin access should have verified background screening records.
+    detection_query: |
+      MATCH (u:User)-[:HAS_ROLE]->(r:Role)
+      WHERE r.is_privileged = true
+        AND u.is_active = true
+        AND u.background_check_completed = false
+      RETURN u.display_name as user,
+             u.email as email,
+             r.name as privileged_role,
+             'No background check on record' as finding
+    remediation: |
+      1. Implement pre-employment background screening policy
+      2. Require background checks before granting privileged access
+      3. Document screening completion dates in HR system
+      4. Sync background check status to IAM platform
+      5. Re-screen privileged users every 2-3 years
+    compliance_mapping:
+      - SOC2-TSC: CC1.4
+      - ISO27001: A.7.1.1
+      - NIST-800-53: PS-3
+    references:
+      - "AICPA TSC 2017: CC1.4 — COSO Principle 4"
+
+  # ==========================================================================
+  # CATEGORY 2: CC2 — COMMUNICATION AND INFORMATION
+  # Internal and external communication of security information
+  # ==========================================================================
+
+  - id: SOC2-CC2-001
+    name: Security Findings Not Reported to Management
+    platform: cross-platform
+    severity: high
+    category: communication
+    tsc_criteria: CC2.2
+    description: >
+      CC2.2 requires the entity to internally communicate information
+      necessary to support the functioning of internal control. Critical
+      and high-severity findings must be reported to management within
+      defined SLAs.
+    detection_query: |
+      MATCH (f:Finding)
+      WHERE f.severity IN ['critical', 'high']
+        AND f.status = 'open'
+        AND f.days_open > 30
+        AND f.reported_to_management = false
+      RETURN f.rule_name as finding,
+             f.platform as platform,
+             f.severity as severity,
+             f.days_open as days_open,
+             'Critical finding unreported to management >30 days' as alert
+    remediation: |
+      1. Define finding escalation SLAs:
+         - Critical: report within 24 hours
+         - High: report within 72 hours
+         - Medium: include in weekly security digest
+      2. Configure automated email alerts to security@company.com
+      3. Create weekly security dashboard for management review
+      4. Track management acknowledgment in the SSPM findings workflow
+    compliance_mapping:
+      - SOC2-TSC: CC2.2
+      - ISO27001: A.16.1.2
+      - NIST-800-53: IR-6
+    references:
+      - "AICPA TSC 2017: CC2.2 — COSO Principle 14"
+
+  - id: SOC2-CC2-002
+    name: No External Vulnerability Disclosure Process
+    platform: cross-platform
+    severity: low
+    category: communication
+    tsc_criteria: CC2.3
+    description: >
+      CC2.3 requires external communication of information about deficiencies
+      in internal controls. A responsible disclosure or bug bounty program
+      should exist for external researchers to report security issues.
+    detection_query: |
+      MATCH (org:Organization {platform: 'github'})
+      WHERE org.has_security_policy = false
+        OR NOT EXISTS(org.security_contact_email)
+      RETURN org.name as organization,
+             'No security.txt or responsible disclosure policy' as finding
+    remediation: |
+      1. Create a SECURITY.md file in your GitHub organization's .github repo
+      2. Publish a security.txt at /.well-known/security.txt
+      3. Define a responsible disclosure policy
+      4. Set up security@yourdomain.com email alias
+      5. Consider HackerOne or Bugcrowd for structured bug bounty
+    compliance_mapping:
+      - SOC2-TSC: CC2.3
+      - ISO27001: A.6.1.3
+    references:
+      - "AICPA TSC 2017: CC2.3 — COSO Principle 15"
+
+  # ==========================================================================
+  # CATEGORY 3: CC3 — RISK ASSESSMENT
+  # Risk identification, analysis, and fraud risk
+  # ==========================================================================
+
+  - id: SOC2-CC3-001
+    name: No Formal Risk Assessment Performed
+    platform: cross-platform
+    severity: high
+    category: risk_assessment
+    tsc_criteria: CC3.1
+    description: >
+      CC3.1 requires the entity to specify objectives with sufficient clarity
+      to enable the identification and assessment of risks. A formal,
+      documented risk assessment must be performed at least annually.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.last_risk_assessment_date IS NULL
+        OR org.last_risk_assessment_days_ago > 365
+      RETURN org.name as organization,
+             org.platform as platform,
+             org.last_risk_assessment_days_ago as days_since_last,
+             'Risk assessment overdue or never performed' as finding
+    remediation: |
+      1. Schedule annual risk assessment using NIST or ISO 27005 methodology
+      2. Identify and catalogue all information assets
+      3. Assess threats, vulnerabilities, likelihood, and impact
+      4. Produce a risk register with owners and treatment plans
+      5. Store risk assessment date in SSPM organizational metadata
+    compliance_mapping:
+      - SOC2-TSC: CC3.1
+      - ISO27001: 6.1.2
+      - NIST-800-53: RA-3
+    references:
+      - "AICPA TSC 2017: CC3.1 — COSO Principle 6"
+
+  - id: SOC2-CC3-002
+    name: Fraud Risk Controls Not Implemented
+    platform: cross-platform
+    severity: high
+    category: risk_assessment
+    tsc_criteria: CC3.3
+    description: >
+      CC3.3 requires the entity to consider the potential for fraud in
+      assessing risks. Controls to prevent unauthorized data modification,
+      privilege abuse, and collusion must be in place.
+    detection_query: |
+      MATCH (u:User)-[:HAS_ROLE]->(r1:Role),
+            (u)-[:HAS_ROLE]->(r2:Role)
+      WHERE r1.can_create_records = true
+        AND r2.can_approve_records = true
+        AND u.is_active = true
+      RETURN u.display_name as user,
+             u.platform as platform,
+             'User can both create and approve records (SOD violation)' as finding
+    remediation: |
+      1. Implement Segregation of Duties (SOD) controls
+      2. Ensure no user can both initiate and approve transactions
+      3. Enable transaction monitoring and anomaly detection
+      4. Require dual approval for high-value or sensitive operations
+      5. Audit all administrative actions weekly
+    compliance_mapping:
+      - SOC2-TSC: CC3.3
+      - ISO27001: A.6.1.2
+      - NIST-800-53: AC-5
+    references:
+      - "AICPA TSC 2017: CC3.3 — COSO Principle 8"
+
+  # ==========================================================================
+  # CATEGORY 4: CC4 — MONITORING ACTIVITIES
+  # Ongoing evaluations and evaluation of deficiencies
+  # ==========================================================================
+
+  - id: SOC2-CC4-001
+    name: No Continuous Security Monitoring Configured
+    platform: cross-platform
+    severity: high
+    category: monitoring
+    tsc_criteria: CC4.1
+    description: >
+      CC4.1 requires the entity to select, develop, and perform ongoing
+      and separate evaluations to ascertain whether components of internal
+      control are present and functioning. Automated continuous monitoring
+      must be in place for all critical platforms.
+    detection_query: |
+      MATCH (connector:Connector)
+      WHERE connector.is_active = true
+        AND (connector.last_scan_days_ago > 7
+             OR connector.auto_scan_enabled = false)
+      RETURN connector.platform as platform,
+             connector.display_name as connector_name,
+             connector.last_scan_days_ago as days_since_scan,
+             connector.auto_scan_enabled as auto_scan,
+             'Connector not scanned in 7+ days or auto-scan disabled' as finding
+    remediation: |
+      1. Enable automatic scheduled scans for all connectors
+      2. Set scan frequency to at minimum daily for critical platforms
+      3. Configure SSPM to alert when scan fails or is skipped
+      4. Review scan results in weekly security meeting
+      5. Track scan history for audit evidence
+    compliance_mapping:
+      - SOC2-TSC: CC4.1
+      - ISO27001: A.12.7.1
+      - NIST-800-53: CA-7
+    references:
+      - "AICPA TSC 2017: CC4.1 — COSO Principle 16"
+
+  - id: SOC2-CC4-002
+    name: Security Findings Not Remediated Within SLA
+    platform: cross-platform
+    severity: high
+    category: monitoring
+    tsc_criteria: CC4.2
+    description: >
+      CC4.2 requires the entity to evaluate and communicate internal control
+      deficiencies in a timely manner. Open findings that exceed remediation
+      SLAs indicate a breakdown in the monitoring and correction cycle.
+    detection_query: |
+      MATCH (f:Finding)
+      WHERE f.status = 'open'
+        AND (
+          (f.severity = 'critical' AND f.days_open > 7)  OR
+          (f.severity = 'high'     AND f.days_open > 30) OR
+          (f.severity = 'medium'   AND f.days_open > 90)
+        )
+      RETURN f.rule_name as finding,
+             f.platform as platform,
+             f.severity as severity,
+             f.days_open as days_open,
+             CASE f.severity
+               WHEN 'critical' THEN 'SLA: 7 days — BREACHED'
+               WHEN 'high'     THEN 'SLA: 30 days — BREACHED'
+               ELSE                 'SLA: 90 days — BREACHED'
+             END as sla_status
+    remediation: |
+      Remediation SLAs for SOC 2 compliance:
+      - Critical findings: remediate within 7 days
+      - High findings: remediate within 30 days
+      - Medium findings: remediate within 90 days
+      - Low findings: remediate within 180 days
+
+      Actions:
+      1. Assign each overdue finding an owner
+      2. Create a remediation ticket in Jira
+      3. Track progress in weekly security review
+      4. If cannot remediate: document risk acceptance with CISO approval
+    compliance_mapping:
+      - SOC2-TSC: CC4.2
+      - ISO27001: A.16.1.6
+      - NIST-800-53: CA-5
+    references:
+      - "AICPA TSC 2017: CC4.2 — COSO Principle 17"
+
+  # ==========================================================================
+  # CATEGORY 5: CC5 — CONTROL ACTIVITIES (POLICIES AND PROCEDURES)
+  # ==========================================================================
+
+  - id: SOC2-CC5-001
+    name: Change Management Process Not Enforced
+    platform: github
+    severity: high
+    category: control_activities
+    tsc_criteria: CC5.3
+    description: >
+      CC5.3 requires the entity to deploy control activities through policies
+      and procedures. All code changes must go through a documented, approved
+      change management process — no direct pushes to production branches.
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE repo.default_branch_protection = false
+        OR repo.required_pull_request_reviews = false
+        OR repo.required_approving_review_count < 1
+      RETURN repo.name as repository,
+             repo.required_approving_review_count as reviewers_required,
+             repo.default_branch_protection as branch_protected,
+             'Repository allows unreviewed changes to default branch' as finding
+    remediation: |
+      1. Enable branch protection on all default branches:
+         Settings → Branches → Add rule
+      2. Require at least 1 (ideally 2) pull request reviews
+      3. Enable "Dismiss stale reviews when new commits are pushed"
+      4. Require status checks to pass before merging
+      5. Restrict who can push directly to protected branches
+    compliance_mapping:
+      - SOC2-TSC: CC5.3
+      - CIS-GitHub: 1.1.3
+      - NIST-800-53: CM-3
+    references:
+      - "AICPA TSC 2017: CC5.3 — COSO Principle 12"
+
+  - id: SOC2-CC5-002
+    name: Technology Controls Not Consistent Across Environments
+    platform: cross-platform
+    severity: medium
+    category: control_activities
+    tsc_criteria: CC5.2
+    description: >
+      CC5.2 requires the entity to select and develop general control
+      activities over technology to support the achievement of objectives.
+      Security configurations must be consistent and enforced uniformly.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.security_baseline_enforced = false
+        OR org.health_check_score < 70
+      RETURN org.name as organization,
+             org.platform as platform,
+             org.health_check_score as health_score,
+             'Security baseline not enforced or health check below 70%' as finding
+    remediation: |
+      1. Define security baseline configurations per platform
+      2. Enable Security Health Check where available (Salesforce, GitHub)
+      3. Use Entra ID Security Score to track Microsoft 365 posture
+      4. Enforce baseline via policy automation where possible
+      5. Review baseline compliance monthly
+    compliance_mapping:
+      - SOC2-TSC: CC5.2
+      - ISO27001: A.12.1.1
+      - NIST-800-53: CM-6
+    references:
+      - "AICPA TSC 2017: CC5.2 — COSO Principle 11"
+
+  # ==========================================================================
+  # CATEGORY 6: CC6 — LOGICAL AND PHYSICAL ACCESS CONTROLS
+  # The most critical category for SaaS SSPM detection
+  # ==========================================================================
+
+  - id: SOC2-CC6-001
+    name: MFA Not Enforced for All Users
+    platform: cross-platform
+    severity: critical
+    category: access_control
+    tsc_criteria: CC6.1
+    description: >
+      CC6.1 requires the entity to implement logical access security software,
+      infrastructure, and architectures. MFA is a foundational control for
+      protecting logical access to systems containing sensitive information.
+      All users must authenticate using at least two factors.
+    detection_query: |
+      MATCH (u:User)
+      WHERE u.is_active = true
+        AND u.mfa_enabled = false
+        AND u.platform IN ['entraid', 'salesforce', 'github']
+      RETURN u.display_name as user,
+             u.email as email,
+             u.platform as platform,
+             'MFA not enabled — CC6.1 direct violation' as finding
+    remediation: |
+      GitHub:
+        Settings → Organizations → Security → Require 2FA
+
+      Salesforce:
+        Setup → Identity → Multi-Factor Authentication → Require MFA
+
+      Entra ID:
+        Conditional Access → New Policy → Grant → Require MFA
+
+      Jira/Atlassian:
+        admin.atlassian.com → Security → Authentication policies → Enforce MFA
+    compliance_mapping:
+      - SOC2-TSC: CC6.1
+      - CIS-Azure-AD: 1.1.1
+      - CIS-GitHub: 1.3.1
+      - ISO27001: A.9.4.2
+      - NIST-800-53: IA-2(1)
+    references:
+      - "AICPA TSC 2017: CC6.1 — Point of Focus: MFA"
+
+  - id: SOC2-CC6-002
+    name: Excessive Privileged Access (Admin Accounts)
+    platform: cross-platform
+    severity: critical
+    category: access_control
+    tsc_criteria: CC6.3
+    description: >
+      CC6.3 requires the entity to restrict access based on need-to-know.
+      The number of administrator accounts must be minimized following the
+      principle of least privilege. Excessive admin accounts increase the
+      blast radius of a compromise.
+    detection_query: |
+      MATCH (u:User)-[:HAS_ROLE]->(r:Role)
+      WHERE r.is_privileged = true
+        AND u.is_active = true
+      WITH u.platform as platform, count(u) as admin_count
+      WHERE admin_count > 5
+      RETURN platform,
+             admin_count,
+             'More than 5 privileged users — exceeds CC6.3 threshold' as finding
+    remediation: |
+      1. Review all admin accounts and remove unnecessary privileges
+      2. Apply least-privilege principle — grant only what is needed
+      3. Use Just-In-Time access via PIM (Entra ID) or equivalent
+      4. Set target: ≤ 4 Global Admins, ≤ 5 per-platform admins
+      5. Review admin list quarterly and document justification for each
+    compliance_mapping:
+      - SOC2-TSC: CC6.3
+      - CIS-Azure-AD: 1.2.1
+      - ISO27001: A.9.2.3
+      - NIST-800-53: AC-6(5)
+    references:
+      - "AICPA TSC 2017: CC6.3"
+
+  - id: SOC2-CC6-003
+    name: Inactive User Accounts Not Disabled
+    platform: cross-platform
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.2
+    description: >
+      CC6.2 requires the entity to register and authorize new internal and
+      external users whose access is authorized. Accounts that are no longer
+      needed (inactive users, former employees) must be promptly disabled
+      to prevent unauthorized access.
+    detection_query: |
+      MATCH (u:User)
+      WHERE u.is_active = true
+        AND u.last_login_days_ago > 90
+        AND u.platform IN ['entraid', 'salesforce', 'github', 'jira']
+      RETURN u.display_name as user,
+             u.email as email,
+             u.platform as platform,
+             u.last_login_days_ago as days_inactive,
+             'Active user inactive 90+ days — violates CC6.2 deprovisioning' as finding
+    remediation: |
+      1. Run quarterly access review — disable accounts inactive 90+ days
+      2. Implement automated offboarding workflow triggered by HR system
+      3. Set up SCIM provisioning to auto-disable terminated employees
+      4. Configure alerts in SSPM for accounts idle > 60 days
+      5. Document all account deactivations for audit evidence
+    compliance_mapping:
+      - SOC2-TSC: CC6.2
+      - CIS-Azure-AD: 1.2.5
+      - ISO27001: A.9.2.6
+      - NIST-800-53: AC-2(3)
+    references:
+      - "AICPA TSC 2017: CC6.2"
+
+  - id: SOC2-CC6-004
+    name: No Access Review Process for Privileged Roles
+    platform: cross-platform
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.2
+    description: >
+      CC6.2 requires periodic re-evaluation of access rights. Privileged
+      role assignments must be reviewed at least quarterly to ensure
+      access remains appropriate and business-justified.
+    detection_query: |
+      MATCH (u:User)-[r:HAS_ROLE]->(role:Role)
+      WHERE role.is_privileged = true
+        AND u.is_active = true
+        AND (r.last_reviewed_days_ago > 90 OR r.last_reviewed_date IS NULL)
+      RETURN u.display_name as user,
+             u.platform as platform,
+             role.name as privileged_role,
+             r.last_reviewed_days_ago as days_since_review,
+             'Privileged access not reviewed in 90+ days' as finding
+    remediation: |
+      1. Configure access reviews in Entra ID Identity Governance
+      2. For non-Entra platforms: schedule quarterly manual reviews
+      3. Document review outcome (approved / revoked) with reviewer name
+      4. Remove access when reviewer does not respond within SLA
+      5. Store review evidence for SOC 2 audit
+    compliance_mapping:
+      - SOC2-TSC: CC6.2
+      - CIS-Azure-AD: 1.2.2
+      - ISO27001: A.9.2.5
+      - NIST-800-53: AC-2(7)
+    references:
+      - "AICPA TSC 2017: CC6.2 — Point of Focus: Access Reviews"
+
+  - id: SOC2-CC6-005
+    name: Shared or Generic Service Accounts Without Controls
+    platform: cross-platform
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.1
+    description: >
+      CC6.1 requires authentication to ensure that only authorized entities
+      gain access. Shared or generic accounts prevent individual accountability
+      and make it impossible to attribute actions to a specific person —
+      a direct violation of SOC 2 audit trail requirements.
+    detection_query: |
+      MATCH (u:User)
+      WHERE u.is_active = true
+        AND (u.is_shared_account = true
+             OR u.username IN ['admin', 'root', 'service', 'test',
+                               'administrator', 'default', 'svc_account'])
+        AND u.session_logging_enabled = false
+      RETURN u.username as account,
+             u.platform as platform,
+             'Shared/generic account without session logging' as finding
+    remediation: |
+      1. Audit all shared/service accounts across platforms
+      2. Replace shared login accounts with individual named accounts
+      3. For service accounts: enable session logging and alerting
+      4. Block interactive login for service accounts where possible
+      5. Rotate service account credentials quarterly
+      6. Require ticket reference for any shared account usage
+    compliance_mapping:
+      - SOC2-TSC: CC6.1
+      - ISO27001: A.9.2.1
+      - NIST-800-53: AC-2
+    references:
+      - "AICPA TSC 2017: CC6.1"
+
+  - id: SOC2-CC6-006
+    name: Third-Party Application Access Not Reviewed
+    platform: cross-platform
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.6
+    description: >
+      CC6.6 requires the entity to implement logical access security measures
+      to protect against threats from sources outside its system boundaries.
+      Third-party OAuth apps and integrations with broad permissions must
+      be regularly reviewed and revoked if no longer needed.
+    detection_query: |
+      MATCH (app:Application {platform: 'entraid'})-[:HAS_PERMISSION]->(perm:Permission)
+      WHERE perm.scope IN ['full', 'api', 'Directory.ReadWrite.All',
+                           'Mail.ReadWrite', 'Files.ReadWrite.All']
+        AND app.last_reviewed_days_ago > 180
+      RETURN app.name as application,
+             collect(perm.scope) as granted_scopes,
+             app.last_reviewed_days_ago as days_since_review,
+             'High-privilege third-party app not reviewed in 180 days' as finding
+    remediation: |
+      1. Audit all OAuth apps with admin or full-access scopes
+      2. Remove permissions not actively used (check last activity date)
+      3. Set review cadence: quarterly for high-privilege, semi-annual for others
+      4. Implement admin consent workflow to gate new app registrations
+      5. Enable app governance add-on (Microsoft Entra) for continuous monitoring
+    compliance_mapping:
+      - SOC2-TSC: CC6.6
+      - CIS-Azure-AD: 1.5.1
+      - ISO27001: A.15.1.1
+      - NIST-800-53: AC-20
+    references:
+      - "AICPA TSC 2017: CC6.6"
+
+  - id: SOC2-CC6-007
+    name: Remote Access Without Security Controls
+    platform: entraid
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.6
+    description: >
+      CC6.6 requires controls over access from outside the system boundary.
+      Remote access to sensitive systems must require MFA, device compliance
+      checks, and network-based restrictions.
+    detection_query: |
+      MATCH (org:Organization {platform: 'entraid'})
+      WHERE NOT EXISTS {
+        MATCH (policy:ConditionalAccessPolicy {platform: 'entraid'})
+        WHERE policy.is_enabled = true
+          AND policy.requires_compliant_device = true
+      }
+      RETURN org.tenant_name as tenant,
+             'No device compliance Conditional Access policy — CC6.6 gap' as finding
+    remediation: |
+      1. Create Conditional Access policy requiring:
+         - MFA for all sign-ins
+         - Compliant or Hybrid Azure AD joined device
+         - Block legacy authentication protocols
+      2. Enroll all corporate devices in Intune MDM
+      3. Define compliance policies (encryption, OS version, AV status)
+      4. Report-only mode for 2 weeks, then enforce
+    compliance_mapping:
+      - SOC2-TSC: CC6.6
+      - CIS-Azure-AD: 1.3.3
+      - NIST-800-53: AC-17
+    references:
+      - "AICPA TSC 2017: CC6.6"
+
+  - id: SOC2-CC6-008
+    name: Encryption Not Enforced for Data in Transit
+    platform: cross-platform
+    severity: critical
+    category: access_control
+    tsc_criteria: CC6.7
+    description: >
+      CC6.7 requires the entity to restrict the transmission, movement,
+      and removal of information to authorized parties. All data in transit
+      must be encrypted using current strong protocols (TLS 1.2+).
+    detection_query: |
+      MATCH (endpoint:RemoteEndpoint)
+      WHERE endpoint.protocol = 'http'
+        OR endpoint.tls_version IN ['1.0', '1.1', 'SSLv3']
+      RETURN endpoint.url as endpoint,
+             endpoint.protocol as protocol,
+             endpoint.tls_version as tls_version,
+             'Insecure data transmission — CC6.7 violation' as finding
+    remediation: |
+      1. Enforce HTTPS on all API endpoints and webhooks
+      2. Disable TLS 1.0 and 1.1 on all servers
+      3. Require TLS 1.2 minimum (TLS 1.3 preferred)
+      4. Enable HSTS with minimum 1 year max-age
+      5. Use strong cipher suites only (disable RC4, DES, 3DES)
+      6. Scan certificates quarterly for expiry and weak configuration
+    compliance_mapping:
+      - SOC2-TSC: CC6.7
+      - PCI-DSS: 4.1
+      - ISO27001: A.10.1.1
+      - NIST-800-53: SC-8
+    references:
+      - "AICPA TSC 2017: CC6.7"
+
+  - id: SOC2-CC6-009
+    name: Sensitive Data Not Encrypted at Rest
+    platform: salesforce
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.7
+    description: >
+      CC6.7 requires protection of information during storage. Sensitive
+      data fields (PII, financial data, health records) must be encrypted
+      at rest using platform-level encryption.
+    detection_query: |
+      MATCH (field:CustomField {platform: 'salesforce'})
+      WHERE field.data_classification IN ['Confidential', 'Restricted', 'PII']
+        AND field.is_encrypted = false
+      RETURN field.object_name as object,
+             field.field_name as field,
+             field.data_classification as classification,
+             'Sensitive field not encrypted at rest — CC6.7 gap' as finding
+    remediation: |
+      1. License Salesforce Shield Platform Encryption
+      2. Navigate to Setup → Platform Encryption
+      3. Generate or import tenant secret
+      4. Enable encryption for all Confidential/Restricted/PII fields
+      5. Test all encrypted fields in sandbox before production
+    compliance_mapping:
+      - SOC2-TSC: CC6.7
+      - ISO27001: A.10.1.1
+      - GDPR: Article 32
+      - NIST-800-53: SC-28
+    references:
+      - "AICPA TSC 2017: CC6.7"
+
+  # ==========================================================================
+  # CATEGORY 7: CC7 — SYSTEM OPERATIONS
+  # Detection and monitoring of anomalies and security events
+  # ==========================================================================
+
+  - id: SOC2-CC7-001
+    name: No SIEM or Centralized Log Management
+    platform: cross-platform
+    severity: high
+    category: system_operations
+    tsc_criteria: CC7.2
+    description: >
+      CC7.2 requires the entity to monitor system components and the operation
+      of those components for anomalies. Logs from all critical systems must
+      be forwarded to a centralized SIEM for correlation and alerting.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.siem_integration_enabled = false
+        OR org.audit_log_export_configured = false
+      RETURN org.name as organization,
+             org.platform as platform,
+             'No SIEM integration or log export configured — CC7.2 gap' as finding
+    remediation: |
+      Entra ID:
+        Diagnostic Settings → Send to Log Analytics Workspace
+
+      Salesforce:
+        Event Monitoring → Enable → Connect to SIEM via Event Bus
+
+      GitHub:
+        Organization Audit Log → Export to SIEM (Splunk/Elastic app)
+
+      Jira:
+        Admin → Audit Log → Stream to SIEM via webhook
+
+      Target SIEM: Splunk, Microsoft Sentinel, Elastic SIEM, or Datadog
+    compliance_mapping:
+      - SOC2-TSC: CC7.2
+      - ISO27001: A.12.4.1
+      - NIST-800-53: AU-2, SI-4
+    references:
+      - "AICPA TSC 2017: CC7.2 — Point of Focus: Log Management"
+
+  - id: SOC2-CC7-002
+    name: Security Alerts Not Configured for Critical Events
+    platform: cross-platform
+    severity: high
+    category: system_operations
+    tsc_criteria: CC7.3
+    description: >
+      CC7.3 requires the entity to evaluate security events to determine
+      whether they represent security incidents. Real-time alerts must
+      be configured for high-risk events such as admin login, privilege
+      escalation, bulk data export, and failed authentication spikes.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE NOT EXISTS {
+        MATCH (alert:AlertRule {platform: org.platform})
+        WHERE alert.is_enabled = true
+          AND alert.event_type IN ['admin_login', 'privilege_change',
+                                   'bulk_export', 'failed_auth_spike',
+                                   'impossible_travel']
+      }
+      RETURN org.name as organization,
+             org.platform as platform,
+             'Critical security event alerts not configured — CC7.3 gap' as finding
+    remediation: |
+      Configure alerts for:
+      1. Admin account login (especially outside business hours)
+      2. Privilege escalation or new role assignment
+      3. Bulk data export or download (> N records)
+      4. Failed authentication spike (> 10 failures in 5 minutes)
+      5. Sign-in from new country/impossible travel
+      6. MFA disabled on any account
+      7. New OAuth app granted admin consent
+    compliance_mapping:
+      - SOC2-TSC: CC7.3
+      - ISO27001: A.16.1.2
+      - NIST-800-53: SI-4, IR-4
+    references:
+      - "AICPA TSC 2017: CC7.3"
+
+  - id: SOC2-CC7-003
+    name: Incident Response Plan Not Documented
+    platform: cross-platform
+    severity: high
+    category: system_operations
+    tsc_criteria: CC7.5
+    description: >
+      CC7.5 requires the entity to develop and implement plans that include
+      roles, responsibilities, communication, and recovery actions to respond
+      to incidents. A formal, tested Incident Response Plan must exist.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.incident_response_plan_exists = false
+        OR org.irp_last_tested_days_ago > 365
+        OR org.irp_last_tested_days_ago IS NULL
+      RETURN org.name as organization,
+             'IRP missing or not tested in 12+ months — CC7.5 gap' as finding
+    remediation: |
+      1. Create an Incident Response Plan covering:
+         - Preparation (tools, contacts, playbooks)
+         - Detection and Analysis
+         - Containment, Eradication, Recovery
+         - Post-Incident Activity (lessons learned)
+      2. Define roles: Incident Commander, Security Analyst, PR, Legal
+      3. Test the plan with a tabletop exercise annually
+      4. Update IRP after every significant incident or major system change
+    compliance_mapping:
+      - SOC2-TSC: CC7.5
+      - ISO27001: A.16.1.1
+      - NIST-800-53: IR-1, IR-8
+    references:
+      - "AICPA TSC 2017: CC7.5"
+
+  - id: SOC2-CC7-004
+    name: Audit Log Retention Below 12 Months
+    platform: cross-platform
+    severity: high
+    category: system_operations
+    tsc_criteria: CC7.2
+    description: >
+      CC7.2 requires collection and analysis of security event data.
+      SOC 2 auditors require at minimum 12 months of log history to
+      validate that controls were operating effectively during the
+      audit period. Shorter retention periods create audit gaps.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.audit_log_retention_days < 365
+        OR org.audit_log_retention_days IS NULL
+      RETURN org.name as organization,
+             org.platform as platform,
+             org.audit_log_retention_days as retention_days,
+             '< 12 months audit log retention — SOC 2 audit evidence gap' as finding
+    remediation: |
+      1. Configure log retention ≥ 365 days on all platforms
+      2. Export logs to Log Analytics Workspace or S3 with lifecycle policy
+      3. Entra ID: Default 30 days → extend via Log Analytics (1-2 years)
+      4. Salesforce: Requires Event Monitoring license for extended retention
+      5. GitHub: Enterprise audit log supports 7-year retention
+      6. Archive cold logs to cost-effective storage (AWS Glacier, Azure Archive)
+    compliance_mapping:
+      - SOC2-TSC: CC7.2
+      - ISO27001: A.12.4.2
+      - NIST-800-53: AU-11
+      - PCI-DSS: 10.7
+    references:
+      - "AICPA TSC 2017: CC7.2"
+
+  - id: SOC2-CC7-005
+    name: High-Risk User Sign-ins Not Investigated
+    platform: entraid
+    severity: critical
+    category: system_operations
+    tsc_criteria: CC7.3
+    description: >
+      CC7.3 requires evaluation of security events to determine whether
+      they represent security incidents. High-risk user events flagged by
+      Identity Protection (leaked credentials, impossible travel, atypical
+      sign-in behavior) must be investigated and remediated promptly.
+    detection_query: |
+      MATCH (u:User {platform: 'entraid'})
+      WHERE u.risk_state = 'atRisk'
+        AND u.risk_level IN ['high', 'medium']
+        AND u.risk_remediated = false
+        AND u.risk_detected_days_ago > 7
+      RETURN u.display_name as user,
+             u.user_principal_name as upn,
+             u.risk_level as risk_level,
+             u.risk_detail as risk_detail,
+             u.risk_detected_days_ago as days_unresolved,
+             'High-risk user unresolved 7+ days — CC7.3 gap' as finding
+    remediation: |
+      1. Review risky user in Entra ID → Protection → Identity Protection
+      2. Confirm or dismiss the risk event based on investigation
+      3. If confirmed compromise:
+         a. Reset password immediately
+         b. Revoke all active sessions
+         c. Force MFA re-registration
+         d. Review recent activity for data exfiltration
+      4. Document investigation and outcome for audit trail
+    compliance_mapping:
+      - SOC2-TSC: CC7.3
+      - ISO27001: A.16.1.5
+      - NIST-800-53: IR-4, IR-5
+    references:
+      - "AICPA TSC 2017: CC7.3"
+
+  # ==========================================================================
+  # CATEGORY 8: CC8 — CHANGE MANAGEMENT
+  # ==========================================================================
+
+  - id: SOC2-CC8-001
+    name: Infrastructure Changes Not Tracked in Version Control
+    platform: github
+    severity: high
+    category: change_management
+    tsc_criteria: CC8.1
+    description: >
+      CC8.1 requires the entity to authorize, design, develop, acquire,
+      implement, and maintain infrastructure components to meet its objectives.
+      All infrastructure-as-code and configuration changes must be version
+      controlled with audit trails.
+    detection_query: |
+      MATCH (org:Organization {platform: 'github'})
+      WHERE org.iac_repository_exists = false
+        OR org.infrastructure_version_controlled = false
+      RETURN org.name as organization,
+             'No IaC repository or infrastructure not version controlled' as finding
+    remediation: |
+      1. Create a dedicated IaC repository (e.g., infrastructure/)
+      2. Use Terraform, Pulumi, or Bicep for all infrastructure changes
+      3. Enforce PR reviews before any infrastructure merge
+      4. Connect IaC repo to CI/CD with automated plan and apply
+      5. Tag all resources with change ticket reference for audit trail
+    compliance_mapping:
+      - SOC2-TSC: CC8.1
+      - ISO27001: A.12.1.2
+      - NIST-800-53: CM-2, CM-3
+    references:
+      - "AICPA TSC 2017: CC8.1"
+
+  - id: SOC2-CC8-002
+    name: Security Testing Not Performed Before Deployment
+    platform: github
+    severity: high
+    category: change_management
+    tsc_criteria: CC8.1
+    description: >
+      CC8.1 requires testing of system changes before deployment to production.
+      Automated security scanning (SAST, dependency scanning, secret scanning)
+      must be required in CI/CD pipelines.
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE repo.secret_scanning_enabled = false
+        AND repo.code_scanning_enabled = false
+        AND repo.dependabot_enabled = false
+        AND repo.is_private = false
+      RETURN repo.name as repository,
+             'No security scanning in CI/CD — CC8.1 gap' as finding
+    remediation: |
+      1. Enable GitHub Advanced Security:
+         - Secret scanning (prevents credential commits)
+         - Code scanning with CodeQL (SAST)
+         - Dependency review (vulnerable packages)
+      2. Enable Dependabot security updates
+      3. Add SAST step to all CI/CD workflows
+      4. Block merging PRs that introduce critical/high vulnerabilities
+      5. Review security alerts weekly
+    compliance_mapping:
+      - SOC2-TSC: CC8.1
+      - CIS-GitHub: 1.5.x
+      - NIST-800-53: SA-11, SI-3
+    references:
+      - "AICPA TSC 2017: CC8.1 — Point of Focus: Security Testing"
+
+  # ==========================================================================
+  # CATEGORY 9: CC9 — RISK MITIGATION
+  # Vendor management, business continuity
+  # ==========================================================================
+
+  - id: SOC2-CC9-001
+    name: No Vendor Risk Assessment for Third-Party Integrations
+    platform: cross-platform
+    severity: medium
+    category: risk_mitigation
+    tsc_criteria: CC9.2
+    description: >
+      CC9.2 requires the entity to assess and manage risks associated with
+      business relationships. All third-party SaaS integrations and connected
+      apps must have a documented vendor risk assessment.
+    detection_query: |
+      MATCH (app:Application)
+      WHERE app.is_active = true
+        AND app.vendor_risk_assessed = false
+        AND app.has_data_access = true
+      RETURN app.name as application,
+             app.platform as platform,
+             app.data_scopes as data_access,
+             'Third-party app with data access not risk assessed' as finding
+    remediation: |
+      1. Inventory all connected third-party applications
+      2. For each app with data access, assess:
+         - SOC 2 Type II report availability
+         - Data processing agreement (DPA) in place
+         - Data residency and retention policies
+         - Breach notification commitments
+      3. Tier vendors by risk: critical, high, medium, low
+      4. Annual review for critical/high vendors; biennial for others
+    compliance_mapping:
+      - SOC2-TSC: CC9.2
+      - ISO27001: A.15.1.1
+      - NIST-800-53: SA-9, PM-9
+    references:
+      - "AICPA TSC 2017: CC9.2"
+
+  - id: SOC2-CC9-002
+    name: Business Continuity Plan Not Tested
+    platform: cross-platform
+    severity: medium
+    category: risk_mitigation
+    tsc_criteria: CC9.1
+    description: >
+      CC9.1 requires the entity to identify, select, and develop risk
+      mitigation activities. A Business Continuity Plan (BCP) / Disaster
+      Recovery Plan (DRP) must exist and be tested annually.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.bcp_exists = false
+        OR org.bcp_last_tested_days_ago > 365
+        OR org.bcp_last_tested_days_ago IS NULL
+      RETURN org.name as organization,
+             'BCP/DRP missing or not tested in 12+ months' as finding
+    remediation: |
+      1. Document a BCP covering:
+         - RTO (Recovery Time Objective) and RPO (Recovery Point Objective)
+         - Critical system dependencies
+         - Failover procedures
+         - Emergency contact list
+      2. Test DR annually via tabletop exercise or live failover test
+      3. Back up all critical platform configurations
+      4. Validate that backups are restorable quarterly
+    compliance_mapping:
+      - SOC2-TSC: CC9.1
+      - ISO27001: A.17.1.1
+      - NIST-800-53: CP-2, CP-10
+    references:
+      - "AICPA TSC 2017: CC9.1"
+
+  # ==========================================================================
+  # CATEGORY 10: A1 — AVAILABILITY
+  # System capacity, performance monitoring, recovery
+  # ==========================================================================
+
+  - id: SOC2-A1-001
+    name: No System Capacity and Performance Monitoring
+    platform: cross-platform
+    severity: medium
+    category: availability
+    tsc_criteria: A1.1
+    description: >
+      A1.1 requires the entity to maintain, monitor, and evaluate current
+      processing capacity and use. Systems providing critical services must
+      be monitored for capacity, performance, and availability with
+      automated alerting when thresholds are breached.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.uptime_monitoring_enabled = false
+        OR org.performance_monitoring_enabled = false
+      RETURN org.name as organization,
+             org.platform as platform,
+             'No uptime or performance monitoring configured — A1.1 gap' as finding
+    remediation: |
+      1. Implement uptime monitoring (Datadog, PagerDuty, Pingdom, UptimeRobot)
+      2. Set SLA targets and alert thresholds (e.g., 99.9% uptime)
+      3. Monitor API response time and error rates
+      4. Configure PagerDuty or OpsGenie for on-call rotation
+      5. Publish status page (Statuspage.io or Cachet)
+    compliance_mapping:
+      - SOC2-TSC: A1.1
+      - ISO27001: A.12.1.3
+      - NIST-800-53: CP-2
+    references:
+      - "AICPA TSC 2017: A1.1"
+
+  - id: SOC2-A1-002
+    name: Data Backup Not Configured or Not Tested
+    platform: cross-platform
+    severity: high
+    category: availability
+    tsc_criteria: A1.2
+    description: >
+      A1.2 requires the entity to have environmental protections, software,
+      data back-up processes, and recovery infrastructure in place. All
+      critical data must be backed up regularly and restores must be tested.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.backup_configured = false
+        OR org.backup_last_restore_test_days_ago > 90
+        OR org.backup_last_restore_test_days_ago IS NULL
+      RETURN org.name as organization,
+             org.platform as platform,
+             org.backup_last_restore_test_days_ago as days_since_restore_test,
+             'Backups not configured or restore not tested in 90+ days' as finding
+    remediation: |
+      1. Configure automated daily backups for all critical systems
+      2. Test restore procedure quarterly (not just backup existence)
+      3. Store backups in a separate geographic region
+      4. Encrypt backups at rest and in transit
+      5. Define and test RTO/RPO targets annually
+      6. Use Salesforce Backup, Azure Backup, or AWS Backup depending on platform
+    compliance_mapping:
+      - SOC2-TSC: A1.2
+      - ISO27001: A.12.3.1
+      - NIST-800-53: CP-9
+    references:
+      - "AICPA TSC 2017: A1.2"
+
+  # ==========================================================================
+  # CATEGORY 11: PI1 — PROCESSING INTEGRITY
+  # Completeness, accuracy, timeliness of processing
+  # ==========================================================================
+
+  - id: SOC2-PI1-001
+    name: No Input Validation Controls on Critical Processes
+    platform: salesforce
+    severity: medium
+    category: processing_integrity
+    tsc_criteria: PI1.1
+    description: >
+      PI1.1 requires the entity to implement policies and procedures to
+      make available or deliver output completely, accurately, and timely.
+      Workflows that process financial or operational data must have
+      input validation and error handling controls.
+    detection_query: |
+      MATCH (process:BusinessProcess {platform: 'salesforce'})
+      WHERE process.input_validation_enabled = false
+        AND process.process_type IN ['financial', 'order', 'approval']
+      RETURN process.name as process,
+             process.process_type as type,
+             'Critical business process lacks input validation — PI1.1 gap' as finding
+    remediation: |
+      1. Implement Salesforce validation rules on critical objects
+         (Opportunity, Order, Invoice, Approval)
+      2. Add workflow error handling to all Apex triggers
+      3. Enable record locking for records in approved state
+      4. Implement audit trail on all financial record changes
+      5. Set up reconciliation reports for data accuracy verification
+    compliance_mapping:
+      - SOC2-TSC: PI1.1
+      - ISO27001: A.12.1.1
+      - NIST-800-53: SI-10
+    references:
+      - "AICPA TSC 2017: PI1.1"
+
+  - id: SOC2-PI1-002
+    name: No Segregation of Duties in Approval Workflows
+    platform: jira
+    severity: high
+    category: processing_integrity
+    tsc_criteria: PI1.3
+    description: >
+      PI1.3 requires the entity to implement controls to prevent unauthorized
+      changes to system inputs and outputs. Approval workflows must enforce
+      SOD — the same person should not be able to both create and approve
+      a change request or purchase order.
+    detection_query: |
+      MATCH (u:User {platform: 'jira'})
+      WHERE u.can_create_issues = true
+        AND u.can_approve_issues = true
+        AND u.is_active = true
+      RETURN u.display_name as user,
+             u.email as email,
+             'User can create and approve Jira issues — SOD violation PI1.3' as finding
+    remediation: |
+      1. Configure Jira workflow approval steps with different role requirements
+      2. Assign 'Creator' and 'Approver' roles to different users/groups
+      3. Use Jira Service Management approval features for formal controls
+      4. Document SOD matrix for all approval workflows
+      5. Audit workflows quarterly to detect SOD drift
+    compliance_mapping:
+      - SOC2-TSC: PI1.3
+      - ISO27001: A.6.1.2
+      - NIST-800-53: AC-5
+    references:
+      - "AICPA TSC 2017: PI1.3"
+
+  # ==========================================================================
+  # CATEGORY 12: C1 — CONFIDENTIALITY
+  # Protection of confidential information
+  # ==========================================================================
+
+  - id: SOC2-C1-001
+    name: Confidential Data Classification Not Implemented
+    platform: cross-platform
+    severity: high
+    category: confidentiality
+    tsc_criteria: C1.1
+    description: >
+      C1.1 requires the entity to identify and maintain confidential
+      information to meet the entity's objectives. All data assets must
+      be classified by sensitivity level so that appropriate controls
+      can be applied.
+    detection_query: |
+      MATCH (field:CustomField)
+      WHERE field.data_classification IS NULL
+        OR field.data_classification = 'Unclassified'
+      WITH count(field) as unclassified_count, field.platform as platform
+      WHERE unclassified_count > 20
+      RETURN platform,
+             unclassified_count as unclassified_fields,
+             'Large number of unclassified data fields — C1.1 gap' as finding
+    remediation: |
+      1. Define data classification schema:
+         - Public: no restrictions
+         - Internal: company use only
+         - Confidential: limited distribution
+         - Restricted: strict need-to-know (PII, financial, health)
+      2. Classify all data fields in Salesforce using Data Classification
+      3. Apply Sensitivity Labels in Microsoft 365 / Purview
+      4. Train all staff on data classification policy
+      5. Audit classification completeness quarterly
+    compliance_mapping:
+      - SOC2-TSC: C1.1
+      - ISO27001: A.8.2.1
+      - GDPR: Article 30
+      - NIST-800-53: RA-2
+    references:
+      - "AICPA TSC 2017: C1.1"
+
+  - id: SOC2-C1-002
+    name: Confidential Data Accessible to Unauthorized Users
+    platform: salesforce
+    severity: critical
+    category: confidentiality
+    tsc_criteria: C1.2
+    description: >
+      C1.2 requires the entity to dispose of confidential information to
+      meet the entity's objectives related to confidentiality. Access to
+      confidential data must be restricted to authorized personnel only,
+      enforced through sharing rules, field-level security, and profiles.
+    detection_query: |
+      MATCH (obj:CustomObject {platform: 'salesforce'})
+      WHERE obj.owd_internal = 'Public Read/Write'
+        AND obj.contains_confidential_data = true
+      RETURN obj.name as object,
+             obj.owd_internal as sharing_model,
+             'Confidential object with Public Read/Write OWD — C1.2 violation' as finding
+    remediation: |
+      1. Change OWD to 'Private' or 'Public Read Only' for sensitive objects
+      2. Use sharing rules to grant access to specific roles/groups only
+      3. Enable field-level security to hide sensitive fields from profiles
+      4. Audit report access — restrict mass export of confidential data
+      5. Enable View Encrypted Data permission controls in Salesforce
+    compliance_mapping:
+      - SOC2-TSC: C1.2
+      - ISO27001: A.9.4.1
+      - GDPR: Article 32
+      - NIST-800-53: AC-3
+    references:
+      - "AICPA TSC 2017: C1.2"
+
+  - id: SOC2-C1-003
+    name: Confidential Data in Non-Production Environments Not Masked
+    platform: salesforce
+    severity: critical
+    category: confidentiality
+    tsc_criteria: C1.2
+    description: >
+      C1.2 requires controls over confidential information throughout
+      its lifecycle. Copying production data with PII or confidential
+      information to sandbox or development environments without masking
+      creates an unauthorized disclosure risk.
+    detection_query: |
+      MATCH (sandbox:Sandbox {platform: 'salesforce'})
+      WHERE sandbox.contains_production_data = true
+        AND sandbox.data_masking_applied = false
+      RETURN sandbox.name as sandbox,
+             sandbox.sandbox_type as type,
+             sandbox.last_refresh_date as last_refresh,
+             'Production PII in sandbox without masking — C1.2 violation' as finding
+    remediation: |
+      1. Purchase Salesforce Data Mask add-on
+      2. Create masking templates for all PII fields
+      3. Run Data Mask immediately after every sandbox refresh
+      4. Anonymize email addresses (.invalid domain suffix)
+      5. Deactivate all sandbox user accounts after refresh
+      6. Document data masking process as audit evidence
+    compliance_mapping:
+      - SOC2-TSC: C1.2
+      - GDPR: Article 25
+      - ISO27001: A.18.1.3
+      - NIST-800-53: SA-3
+    references:
+      - "AICPA TSC 2017: C1.2"
+
+  # ==========================================================================
+  # CATEGORY 13: P — PRIVACY
+  # Collection, use, retention, disclosure of personal information
+  # ==========================================================================
+
+  - id: SOC2-P1-001
+    name: No Privacy Notice or Consent Management
+    platform: cross-platform
+    severity: high
+    category: privacy
+    tsc_criteria: P1.1
+    description: >
+      P1.1 requires the entity to provide notice to data subjects about
+      how personal information is collected, used, retained, disclosed,
+      and disposed of. A privacy notice must be accessible to all data
+      subjects.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.privacy_notice_published = false
+        OR org.privacy_notice_url IS NULL
+        OR org.consent_management_configured = false
+      RETURN org.name as organization,
+             org.platform as platform,
+             'No privacy notice or consent management — P1.1 gap' as finding
+    remediation: |
+      1. Draft a GDPR/CCPA-compliant Privacy Notice covering:
+         - What personal data is collected
+         - Why it is collected (lawful basis)
+         - How long it is retained
+         - Who it is shared with
+         - Data subject rights
+      2. Publish privacy notice at /privacy on all customer-facing systems
+      3. Implement cookie consent banner if applicable
+      4. Configure consent records in CRM (Salesforce)
+      5. Review privacy notice annually or after significant changes
+    compliance_mapping:
+      - SOC2-TSC: P1.1
+      - GDPR: Article 13
+      - CCPA: Section 1798.100
+      - ISO27001: A.18.1.4
+    references:
+      - "AICPA TSC 2017: P1.1"
+
+  - id: SOC2-P3-001
+    name: Personal Data Retained Beyond Required Period
+    platform: cross-platform
+    severity: high
+    category: privacy
+    tsc_criteria: P3.2
+    description: >
+      P3.2 requires the entity to retain personal information consistent
+      with its objectives related to privacy. Data must not be retained
+      longer than necessary for its original purpose. Retention schedules
+      must be defined and enforced for all personal data categories.
+    detection_query: |
+      MATCH (record:PersonalDataRecord)
+      WHERE record.retention_policy_defined = false
+        OR record.data_age_days > record.max_retention_days
+      RETURN record.data_type as data_type,
+             record.platform as platform,
+             record.data_age_days as age_days,
+             record.max_retention_days as max_allowed,
+             'Personal data exceeds retention policy — P3.2 violation' as finding
+    remediation: |
+      1. Define data retention schedules per data category:
+         - Customer PII: 3 years after contract end
+         - Employee data: 7 years after employment end
+         - Marketing data: 2 years after last interaction
+         - Log data: 12 months (security logs), 7 years (financial)
+      2. Implement automated deletion or anonymization at retention end
+      3. Configure Salesforce Data Archival for old records
+      4. Document retention schedule in Privacy Policy
+    compliance_mapping:
+      - SOC2-TSC: P3.2
+      - GDPR: Article 5(1)(e)
+      - ISO27001: A.18.1.3
+      - NIST-800-53: SI-12
+    references:
+      - "AICPA TSC 2017: P3.2"
+
+  - id: SOC2-P4-001
+    name: Personal Data Shared Without DPA or Adequate Safeguards
+    platform: cross-platform
+    severity: critical
+    category: privacy
+    tsc_criteria: P4.2
+    description: >
+      P4.2 requires the entity to create and retain a complete, accurate,
+      and timely record of user consent to the disclosure of personal
+      information. Personal data must not be shared with third parties
+      without a Data Processing Agreement and documented legal basis.
+    detection_query: |
+      MATCH (app:Application)-[:HAS_PERMISSION]->(perm:Permission)
+      WHERE perm.scope IN ['Mail.ReadWrite', 'Files.ReadWrite.All',
+                           'Contacts.ReadWrite', 'User.ReadWrite.All']
+        AND app.dpa_in_place = false
+        AND app.publisher_verified = false
+      RETURN app.name as application,
+             app.platform as platform,
+             collect(perm.scope) as data_scopes,
+             'Third-party app accessing PII without DPA — P4.2 violation' as finding
+    remediation: |
+      1. Audit all apps with access to personal data scopes
+      2. Obtain signed DPA from each vendor processing personal data
+      3. Verify vendor is in an adequate jurisdiction or has SCCs in place
+      4. Remove apps that cannot provide DPA or adequate safeguards
+      5. Maintain vendor DPA register as audit evidence
+    compliance_mapping:
+      - SOC2-TSC: P4.2
+      - GDPR: Article 28
+      - CCPA: Section 1798.140
+      - ISO27001: A.15.1.2
+    references:
+      - "AICPA TSC 2017: P4.2"
+
+  - id: SOC2-P6-001
+    name: No Process to Handle Data Subject Access Requests
+    platform: cross-platform
+    severity: high
+    category: privacy
+    tsc_criteria: P6.6
+    description: >
+      P6.6 requires the entity to provide data subjects with access to their
+      personal information for review. A documented and operational process
+      must exist to respond to Data Subject Access Requests (DSARs) within
+      regulatory timeframes (30 days for GDPR).
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.dsar_process_documented = false
+        OR org.dsar_response_time_days > 30
+      RETURN org.name as organization,
+             'No DSAR process or SLA exceeds 30 days — P6.6 gap' as finding
+    remediation: |
+      1. Document a DSAR (Data Subject Access Request) process:
+         - Intake channel: privacy@company.com or online form
+         - Identity verification procedure
+         - Data discovery across all systems
+         - Response template and timeline (≤ 30 days for GDPR)
+      2. Use Salesforce Privacy Center or OneTrust for DSAR automation
+      3. Train support and HR teams to recognize and route DSARs
+      4. Log all DSARs and response times for audit evidence
+    compliance_mapping:
+      - SOC2-TSC: P6.6
+      - GDPR: Article 15
+      - CCPA: Section 1798.100
+      - ISO27001: A.18.1.4
+    references:
+      - "AICPA TSC 2017: P6.6"
+
+  # ==========================================================================
+  # CATEGORY 14: ADDITIONAL CROSS-PLATFORM SOC 2 CONTROLS
+  # Vendor management, penetration testing, training
+  # ==========================================================================
+
+  - id: SOC2-CC6-010
+    name: No Penetration Testing Performed
+    platform: cross-platform
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.1
+    description: >
+      CC6.1 requires testing to ensure logical access security measures
+      are present and functioning. Annual penetration testing by qualified
+      independent security professionals must be performed and documented.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.pentest_last_performed_days_ago > 365
+        OR org.pentest_last_performed_days_ago IS NULL
+      RETURN org.name as organization,
+             org.pentest_last_performed_days_ago as days_since_pentest,
+             'No pentest in 12+ months — CC6.1 evidence gap' as finding
+    remediation: |
+      1. Engage a qualified third-party penetration testing firm annually
+      2. Scope: internal network, external perimeter, web applications,
+         APIs, social engineering
+      3. Document findings and remediation plan from pentest report
+      4. Remediate critical/high findings within 30 days of report
+      5. Retain pentest reports as SOC 2 audit evidence (5 years minimum)
+    compliance_mapping:
+      - SOC2-TSC: CC6.1
+      - ISO27001: A.18.2.3
+      - PCI-DSS: 11.3
+      - NIST-800-53: CA-8
+    references:
+      - "AICPA TSC 2017: CC6.1 — Point of Focus: Penetration Testing"
+
+  - id: SOC2-CC1-004
+    name: Security Awareness Training Not Completed
+    platform: cross-platform
+    severity: medium
+    category: control_environment
+    tsc_criteria: CC1.4
+    description: >
+      CC1.4 requires the entity to attract, develop, and retain competent
+      individuals in alignment with its objectives. All employees must
+      complete security awareness training covering phishing, social
+      engineering, data handling, and incident reporting.
+    detection_query: |
+      MATCH (u:User)
+      WHERE u.is_active = true
+        AND u.account_type = 'Member'
+        AND (u.security_training_completed = false
+             OR u.security_training_days_ago > 365)
+      WITH count(u) as untrained_users
+      WHERE untrained_users > 0
+      RETURN untrained_users,
+             'Users without current security training — CC1.4 gap' as finding
+    remediation: |
+      1. Implement annual security awareness training program
+         (KnowBe4, Proofpoint Security Awareness, or custom LMS)
+      2. Topics: phishing, social engineering, password hygiene,
+         data classification, incident reporting, clean desk policy
+      3. Track completion rates and require 100% within 30 days of hire
+      4. Simulate phishing attacks quarterly to measure effectiveness
+      5. Store completion certificates as SOC 2 audit evidence
+    compliance_mapping:
+      - SOC2-TSC: CC1.4
+      - ISO27001: A.7.2.2
+      - NIST-800-53: AT-2
+    references:
+      - "AICPA TSC 2017: CC1.4"
+
+  - id: SOC2-CC6-011
+    name: API Keys and Secrets Not Rotated Regularly
+    platform: cross-platform
+    severity: high
+    category: access_control
+    tsc_criteria: CC6.1
+    description: >
+      CC6.1 requires the entity to implement authentication controls.
+      Long-lived API keys and client secrets that are never rotated
+      represent a persistent credential exposure risk. Secrets must be
+      rotated on a defined schedule.
+    detection_query: |
+      MATCH (app:Application)-[:HAS_SECRET]->(secret:ClientSecret)
+      WHERE secret.last_rotated_days_ago > 180
+        OR secret.expiry_date IS NULL
+        OR secret.expiry_days_remaining < 30
+      RETURN app.name as application,
+             app.platform as platform,
+             secret.last_rotated_days_ago as days_since_rotation,
+             secret.expiry_days_remaining as expires_in_days,
+             'API secret not rotated in 180+ days or expiring soon' as finding
+    remediation: |
+      1. Define secret rotation policy: 90 days for sensitive, 180 days max
+      2. Store all secrets in a secrets manager (Azure Key Vault, AWS Secrets Manager, HashiCorp Vault)
+      3. Enable automatic secret rotation where supported
+      4. Set expiry dates on all client secrets (max 1 year)
+      5. Alert 30 days before expiry for manual rotation
+      6. Immediately rotate any secret potentially exposed
+    compliance_mapping:
+      - SOC2-TSC: CC6.1
+      - CIS-Azure-AD: 1.5.3
+      - NIST-800-53: IA-5(1)
+    references:
+      - "AICPA TSC 2017: CC6.1"
+
+  - id: SOC2-CC7-006
+    name: Vulnerability Management Program Not in Place
+    platform: cross-platform
+    severity: high
+    category: system_operations
+    tsc_criteria: CC7.1
+    description: >
+      CC7.1 requires the entity to detect and monitor for new vulnerabilities
+      on an ongoing basis. A formal vulnerability management program with
+      regular scanning, triage, and remediation tracking must be in place.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.vulnerability_scanning_enabled = false
+        OR org.vuln_scan_last_performed_days_ago > 30
+      RETURN org.name as organization,
+             org.platform as platform,
+             'No vulnerability scanning or scan overdue — CC7.1 gap' as finding
+    remediation: |
+      1. Implement continuous vulnerability scanning:
+         - Code dependencies: Dependabot, Snyk, or OWASP Dependency Check
+         - Container images: Trivy, Grype, or Aqua Security
+         - Infrastructure: Qualys, Tenable, or AWS Inspector
+      2. Define vulnerability SLAs:
+         - Critical: remediate within 15 days
+         - High: remediate within 30 days
+         - Medium: remediate within 90 days
+      3. Track open vulnerabilities in a dedicated register
+      4. Monthly vulnerability review meeting
+    compliance_mapping:
+      - SOC2-TSC: CC7.1
+      - ISO27001: A.12.6.1
+      - NIST-800-53: RA-5
+      - PCI-DSS: 6.3.3
+    references:
+      - "AICPA TSC 2017: CC7.1"
+
+  - id: SOC2-CC5-003
+    name: No Formal Offboarding Process
+    platform: cross-platform
+    severity: high
+    category: control_activities
+    tsc_criteria: CC5.1
+    description: >
+      CC5.1 requires the entity to select and develop control activities
+      that contribute to the mitigation of risks. The absence of a formal
+      offboarding checklist results in terminated employees retaining
+      access to systems — a direct CC6.2 and CC5.1 risk.
+    detection_query: |
+      MATCH (u:User)
+      WHERE u.is_active = true
+        AND u.employment_status = 'terminated'
+      RETURN u.display_name as user,
+             u.email as email,
+             u.platform as platform,
+             u.termination_date as terminated_on,
+             'Terminated employee still has active account — CC5.1/CC6.2 violation' as finding
+    remediation: |
+      1. Create a formal offboarding checklist:
+         - Disable all platform accounts within 24 hours of termination
+         - Revoke all active sessions and tokens
+         - Transfer or archive account data
+         - Remove from all groups and mailing lists
+         - Revoke hardware (laptop, badge, keys)
+         - Disable VPN and remote access
+      2. Automate via SCIM provisioning connected to HR system
+      3. Run weekly report of recently terminated users vs active accounts
+    compliance_mapping:
+      - SOC2-TSC: CC5.1, CC6.2
+      - ISO27001: A.7.3.1
+      - NIST-800-53: PS-4
+    references:
+      - "AICPA TSC 2017: CC5.1, CC6.2"
+
+  - id: SOC2-CC6-012
+    name: Public Repositories Containing Sensitive Code or Secrets
+    platform: github
+    severity: critical
+    category: access_control
+    tsc_criteria: CC6.1
+    description: >
+      CC6.1 requires the entity to identify and authenticate users and
+      restrict access. Public repositories may expose sensitive code,
+      internal architecture, hardcoded credentials, or proprietary
+      algorithms to the public internet.
+    detection_query: |
+      MATCH (repo:Resource {platform: 'github', resource_type: 'repository'})
+      WHERE repo.visibility = 'public'
+        AND (repo.has_secrets_detected = true
+             OR repo.contains_internal_config = true
+             OR repo.secret_scanning_alert_count > 0)
+      RETURN repo.name as repository,
+             repo.secret_scanning_alert_count as secret_alerts,
+             'Public repo with secrets or sensitive data — CC6.1 critical' as finding
+    remediation: |
+      1. Immediately rotate any detected secrets
+      2. Use git history rewriting (BFG Repo Cleaner) to remove secrets from history
+      3. Make the repository private if it should not be public
+      4. Enable GitHub Secret Scanning push protection to block future commits
+      5. Add .gitignore rules for all config and credential files
+      6. Use environment variables or secrets managers — never hardcode secrets
+    compliance_mapping:
+      - SOC2-TSC: CC6.1
+      - CIS-GitHub: 1.5.1
+      - NIST-800-53: SA-12
+    references:
+      - "AICPA TSC 2017: CC6.1"
+
+  - id: SOC2-CC2-003
+    name: No Whistleblower or Ethical Reporting Channel
+    platform: cross-platform
+    severity: low
+    category: communication
+    tsc_criteria: CC2.1
+    description: >
+      CC2.1 requires the entity to obtain or generate and use relevant,
+      quality information to support the functioning of internal control.
+      An anonymous reporting channel for ethical concerns and security
+      incidents supports the entity's control environment.
+    detection_query: |
+      MATCH (org:Organization)
+      WHERE org.ethics_reporting_channel_exists = false
+        OR org.anonymous_reporting_enabled = false
+      RETURN org.name as organization,
+             'No anonymous ethics/security reporting channel — CC2.1 gap' as finding
+    remediation: |
+      1. Implement an anonymous reporting channel:
+         - Ethics hotline (third-party: EthicsPoint, Navex)
+         - Anonymous web form
+         - Dedicated email security@company.com
+      2. Publish channel in employee handbook and security policy
+      3. Assign a named owner (typically HR or Compliance)
+      4. Guarantee non-retaliation in policy
+      5. Review submissions monthly and document actions taken
+    compliance_mapping:
+      - SOC2-TSC: CC2.1
+      - ISO27001: A.6.1.3
+      - NIST-800-53: PM-14
+    references:
+      - "AICPA TSC 2017: CC2.1 — COSO Principle 13"
+
+metadata:
+  version: "1.0"
+  created: "2026-05-17"
+  framework: "AICPA SOC 2 Trust Services Criteria (TSC) 2017 Updated 2022"
+  author: "SSPM Platform — SOC 2 Detection Rules"
+  total_rules: 60
+  coverage:
+    CC1_control_environment: 4
+    CC2_communication: 3
+    CC3_risk_assessment: 2
+    CC4_monitoring: 2
+    CC5_control_activities: 3
+    CC6_access_controls: 12
+    CC7_system_operations: 6
+    CC8_change_management: 2
+    CC9_risk_mitigation: 2
+    A1_availability: 2
+    PI1_processing_integrity: 2
+    C1_confidentiality: 3
+    P_privacy: 4
+    additional: 13
+  severity_breakdown:
+    critical: 9
+    high: 38
+    medium: 10
+    low: 3
+  platforms_covered:
+    - github
+    - jira
+    - salesforce
+    - entraid
+    - cross-platform
+  tsc_controls_mapped:
+    - CC1.1
+    - CC1.3
+    - CC1.4
+    - CC2.1
+    - CC2.2
+    - CC2.3
+    - CC3.1
+    - CC3.3
+    - CC4.1
+    - CC4.2
+    - CC5.1
+    - CC5.2
+    - CC5.3
+    - CC6.1
+    - CC6.2
+    - CC6.3
+    - CC6.6
+    - CC6.7
+    - CC7.1
+    - CC7.2
+    - CC7.3
+    - CC7.5
+    - CC8.1
+    - CC9.1
+    - CC9.2
+    - A1.1
+    - A1.2
+    - PI1.1
+    - PI1.3
+    - C1.1
+    - C1.2
+    - P1.1
+    - P3.2
+    - P4.2
+    - P6.6
+  load_command: "python -m scripts.load_rules --platform cross-platform --file soc2_security_rules.yaml"
+  run_command: "python -m scripts.run_detection --framework SOC2"
+  compliance_reporting_note: >
+    These rules map directly to the SOC 2 compliance engine in core/compliance_engine.py.
+    The framework_key for scoring is 'SOC2'. Each rule's compliance_mapping field
+    contains the TSC criterion that the finding satisfies or violates.
+    Use GET /api/v1/compliance/scores?framework=SOC2 to retrieve the overall score.
