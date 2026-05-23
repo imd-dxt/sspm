@@ -1,44 +1,95 @@
-<div class="cover-page">
-  <span class="confidential-badge">Confidential</span>
+<div class="cover no-break">
 
-  <div style="margin-top: 80px;">
-    <div class="cover-title">Cybersecurity Compliance Report</div>
+  <!-- White header strip: HPS logo on left, tagline on right -->
+  <div class="cover-header-strip">
+    {% if logo_url %}
+    <img src="{{ logo_url }}" alt="HPS">
+    {% else %}
+    <span class="cover-header-hps">HPS</span>
+    {% endif %}
+    <div class="cover-header-tagline">
+      SaaS Security Posture Management<br>
+      <span style="color:#94a3b8;">Automated Compliance &amp; Risk Assessment</span>
+    </div>
+  </div>
+
+  <!-- Dark body -->
+  <div class="cover-body">
+
+    <span class="cover-classification">{{ classification | default('Confidential') }}</span>
+
+    <div class="cover-title">Cybersecurity<br>Compliance Report</div>
     <div class="cover-subtitle">SaaS Security Posture Assessment</div>
-    <hr class="cover-divider" />
 
-    <div class="cover-meta">
-      <div><strong>Prepared for:</strong> {{ organisation_name | default('Your Organisation') }}</div>
-      <div><strong>Report period:</strong> Last {{ report_period_days | default(30) }} days</div>
-      <div><strong>Classification:</strong> {{ classification | default('Confidential') }}</div>
-      <div><strong>Generated:</strong> {{ generated_at | default('') }}</div>
-      <div style="margin-top: 10px;"><strong>Platforms assessed:</strong>
-        {% for p in platforms %}{{ p | title }}{% if not loop.last %} | {% endif %}{% endfor %}
-      </div>
-      <div><strong>Frameworks:</strong>
-        {% for f in frameworks %}{{ framework_names.get(f, f) | default(f) }}{% if not loop.last %} | {% endif %}{% endfor %}
-      </div>
-    </div>
+    <hr class="cover-divider">
 
-    <hr class="cover-divider" />
-
-    <div style="margin-top: 20px;">
-      <div style="font-size: 9pt; color: #64748b; margin-bottom: 4px;">Overall Compliance Score</div>
-      <div class="overall-score-display score-{{ overall_status | default('amber') }}">
-        {{ overall_score | default(0) }}%
+    <!-- Score ring + status -->
+    <div class="cover-score-row">
+      <div class="cover-score-ring">
+        <div class="cover-score-num score-{{ overall_status | default('amber') }}">{{ overall_score | default(0) }}%</div>
+        <div class="cover-score-lbl">Overall Score</div>
       </div>
-      <div style="margin-top: 10px;">
+      <div>
         {% if overall_score | default(0) >= 80 %}
-          <span class="status-badge status-compliant">&#10003; Compliant</span>
+          <div class="cover-status-badge status-compliant">&#10003;&nbsp; Compliant</div>
         {% elif overall_score | default(0) >= 60 %}
-          <span class="status-badge status-partial">&#9888; Partially Compliant</span>
+          <div class="cover-status-badge status-partial">&#9888;&nbsp; Partially Compliant</div>
         {% else %}
-          <span class="status-badge status-non-compliant">&#10007; Non-Compliant</span>
+          <div class="cover-status-badge status-non-compliant">&#10007;&nbsp; Non-Compliant</div>
         {% endif %}
+        <div class="cover-status-desc">
+          Assessment covers {{ platforms | length }} connected platform(s) across
+          {{ frameworks | length }} compliance framework(s).
+          Findings reflect the security posture as of the report date.
+        </div>
       </div>
+    </div>
+
+    <hr class="cover-divider">
+
+    <!-- Metadata grid -->
+    <div class="cover-meta-grid">
+      <div>
+        <div class="cover-meta-label">Client / Organisation</div>
+        <div class="cover-meta-value">{{ organisation_name | default('Your Organisation') }}</div>
+      </div>
+      <div>
+        <div class="cover-meta-label">Report Date</div>
+        <div class="cover-meta-value">{{ generated_at | default('') }}</div>
+      </div>
+      <div>
+        <div class="cover-meta-label">Platforms Assessed</div>
+        <div class="cover-meta-value">
+          {% for p in platforms %}{{ p | title }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </div>
+      </div>
+      <div>
+        <div class="cover-meta-label">Frameworks</div>
+        <div class="cover-meta-value">
+          {% for f in frameworks %}{{ framework_names.get(f, f) }}{% if not loop.last %}, {% endif %}{% endfor %}
+        </div>
+      </div>
+      <div>
+        <div class="cover-meta-label">Report Period</div>
+        <div class="cover-meta-value">Last {{ report_period_days | default(30) }} days</div>
+      </div>
+      <div>
+        <div class="cover-meta-label">Total Findings</div>
+        <div class="cover-meta-value">{{ failed_rules | default(0) }} open &nbsp;/&nbsp; {{ passed_rules | default(0) }} passing</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Dark footer -->
+  <div class="cover-footer">
+    <div class="cover-footer-disclaimer">
+      This report contains sensitive security information. Distribution is restricted
+      to authorised personnel only. Do not copy or forward without written approval.
+    </div>
+    <div class="cover-footer-brand">
+      Prepared by HPS &mdash; SSPM Platform
     </div>
   </div>
 
-  <div style="margin-top: auto; padding-top: 40px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8;">
-    SSPM Platform &mdash; Automated Security Posture Assessment
-  </div>
 </div>

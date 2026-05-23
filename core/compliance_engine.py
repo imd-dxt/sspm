@@ -421,6 +421,7 @@ def build_grc_report_structure(
 # ── HTML → PDF via weasyprint + Jinja2 ───────────────────────────────────────
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates" / "report"
+_LOGO_PATH = Path(__file__).parent.parent / "frontend" / "public" / "logos" / "hps.png"
 
 
 def generate_pdf_report(report_data: dict[str, Any], output_path: str | None = None) -> bytes:
@@ -439,9 +440,10 @@ def generate_pdf_report(report_data: dict[str, Any], output_path: str | None = N
         from jinja2 import Environment, FileSystemLoader
         from weasyprint import HTML as WeasyHTML
 
+        logo_url = f"file://{_LOGO_PATH.as_posix()}" if _LOGO_PATH.exists() else ""
         env = Environment(loader=FileSystemLoader(str(_TEMPLATE_DIR)), autoescape=True)
         template = env.get_template("base.html")
-        html_content = template.render(**report_data)
+        html_content = template.render(**report_data, logo_url=logo_url)
 
         pdf_bytes: bytes = WeasyHTML(string=html_content, base_url=str(_TEMPLATE_DIR)).write_pdf()
     except ImportError:

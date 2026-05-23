@@ -1,27 +1,33 @@
 <div class="page-break">
-  <div class="section-title">Executive Summary</div>
+  <div class="section-title"><span class="section-number">1</span> Executive Summary</div>
 
   <!-- KPI Strip -->
   <div class="kpi-strip">
     <div class="kpi-card overall">
       <div class="kpi-label">Overall Score</div>
       <div class="kpi-value overall">{{ overall_score | default(0) }}%</div>
+      <div class="kpi-sublabel">{{ overall_status | default('') | title }}</div>
     </div>
     <div class="kpi-card critical">
       <div class="kpi-label">Critical Findings</div>
       <div class="kpi-value critical">
-        {{ enriched_findings | selectattr('severity', 'equalto', 'critical') | list | length | default(0) }}
+        {% set crit = enriched_findings | selectattr('severity', 'equalto', 'critical') | list %}
+        {{ (failed_rules | default(0)) if not crit else crit | length }}
       </div>
+      <div class="kpi-sublabel">Open issues</div>
     </div>
     <div class="kpi-card high">
       <div class="kpi-label">High Findings</div>
       <div class="kpi-value high">
-        {{ enriched_findings | selectattr('severity', 'equalto', 'high') | list | length | default(0) }}
+        {% set highs = enriched_findings | selectattr('severity', 'equalto', 'high') | list %}
+        {{ highs | length }}
       </div>
+      <div class="kpi-sublabel">Open issues</div>
     </div>
     <div class="kpi-card resolved">
-      <div class="kpi-label">Passing Rules</div>
+      <div class="kpi-label">Passing Controls</div>
       <div class="kpi-value resolved">{{ passed_rules | default(0) }}</div>
+      <div class="kpi-sublabel">Rules compliant</div>
     </div>
   </div>
 
@@ -30,16 +36,20 @@
   <div class="ai-narrative">{{ ai_executive_summary }}</div>
   {% endif %}
 
-  <!-- Key risks callout -->
+  <!-- Top risks callout -->
   {% set critical_risks = enriched_findings | selectattr('severity', 'equalto', 'critical') | list %}
-  {% set high_risks = enriched_findings | selectattr('severity', 'equalto', 'high') | list %}
-  {% set top_risks = (critical_risks + high_risks)[:3] %}
+  {% set high_risks     = enriched_findings | selectattr('severity', 'equalto', 'high')     | list %}
+  {% set top_risks      = (critical_risks + high_risks)[:5] %}
   {% if top_risks %}
   <div class="key-risks-box">
-    <h4>&#9888; Top risks requiring attention:</h4>
+    <h4>&#9888;&nbsp; Top risks requiring immediate attention</h4>
     <ol>
       {% for r in top_risks %}
-      <li>{{ r.name | default('Unknown') }} ({{ r.platform | default('') | title }}) &mdash; {{ r.severity | upper }}</li>
+      <li>
+        <strong>{{ r.name | default('Unknown') }}</strong>
+        &nbsp;&mdash;&nbsp;{{ r.platform | default('') | title }}
+        &nbsp;<span class="sev-badge sev-{{ r.severity | default('medium') }}">{{ r.severity | default('') | upper }}</span>
+      </li>
       {% endfor %}
     </ol>
   </div>
