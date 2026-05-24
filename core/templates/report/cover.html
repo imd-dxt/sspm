@@ -1,19 +1,22 @@
 <div class="cover no-break">
 
-  <!-- White header strip: HPS logo on left, tagline on right -->
-  <div class="cover-header-strip">
+  <!-- Navy top band with HPS logo -->
+  <div class="cover-top-band">
     {% if logo_url %}
     <img src="{{ logo_url }}" alt="HPS">
     {% else %}
-    <span class="cover-header-hps">HPS</span>
+    <span class="cover-top-band-hps">HPS</span>
     {% endif %}
-    <div class="cover-header-tagline">
+    <div class="cover-top-tagline">
       SaaS Security Posture Management<br>
-      <span style="color:#94a3b8;">Automated Compliance &amp; Risk Assessment</span>
+      <span style="color:rgba(255,255,255,0.45);">Automated Compliance &amp; Risk Assessment</span>
     </div>
   </div>
 
-  <!-- Dark body -->
+  <!-- Thin blue gradient accent stripe -->
+  <div class="cover-accent-stripe"></div>
+
+  <!-- White body -->
   <div class="cover-body">
 
     <span class="cover-classification">{{ classification | default('Confidential') }}</span>
@@ -81,7 +84,7 @@
 
   </div>
 
-  <!-- Dark footer -->
+  <!-- Light footer -->
   <div class="cover-footer">
     <div class="cover-footer-disclaimer">
       This report contains sensitive security information. Distribution is restricted

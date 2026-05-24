@@ -10,18 +10,12 @@
     </div>
     <div class="kpi-card critical">
       <div class="kpi-label">Critical Findings</div>
-      <div class="kpi-value critical">
-        {% set crit = enriched_findings | selectattr('severity', 'equalto', 'critical') | list %}
-        {{ (failed_rules | default(0)) if not crit else crit | length }}
-      </div>
+      <div class="kpi-value critical">{{ finding_counts.critical | default(0) }}</div>
       <div class="kpi-sublabel">Open issues</div>
     </div>
     <div class="kpi-card high">
       <div class="kpi-label">High Findings</div>
-      <div class="kpi-value high">
-        {% set highs = enriched_findings | selectattr('severity', 'equalto', 'high') | list %}
-        {{ highs | length }}
-      </div>
+      <div class="kpi-value high">{{ finding_counts.high | default(0) }}</div>
       <div class="kpi-sublabel">Open issues</div>
     </div>
     <div class="kpi-card resolved">

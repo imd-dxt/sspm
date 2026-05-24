@@ -78,16 +78,19 @@
     }
 
     /* ── Cover page ──────────────────────────────────────────────── */
-    .cover { page: cover-page; min-height: 297mm; background: var(--navy); display: flex; flex-direction: column; page-break-after: always; }
+    .cover { page: cover-page; min-height: 297mm; background: white; display: flex; flex-direction: column; page-break-after: always; }
 
-    .cover-header-strip {
-      background: white; padding: 16px 28px;
+    /* Top navy band with logo */
+    .cover-top-band {
+      background: var(--navy); padding: 18px 36px;
       display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 4px solid var(--navy);
     }
-    .cover-header-strip img { height: 46px; }
-    .cover-header-hps { font-size: 20pt; font-weight: 700; color: var(--navy); letter-spacing: -0.02em; }
-    .cover-header-tagline { font-size: 8pt; color: var(--muted); text-align: right; line-height: 1.5; }
+    .cover-top-band img { height: 44px; filter: brightness(0) invert(1); }
+    .cover-top-band-hps { font-size: 22pt; font-weight: 700; color: white; letter-spacing: -0.02em; }
+    .cover-top-tagline  { font-size: 8pt; color: rgba(255,255,255,0.65); text-align: right; line-height: 1.6; }
+
+    /* Thin accent stripe below top band */
+    .cover-accent-stripe { height: 5px; background: linear-gradient(to right, #2563eb, #1e3a5f); }
 
     .cover-body { flex: 1; padding: 44px 40px 36px; display: flex; flex-direction: column; }
 
@@ -97,19 +100,20 @@
       letter-spacing: 0.1em; text-transform: uppercase; align-self: flex-start; margin-bottom: 36px;
     }
 
-    .cover-title    { font-size: 28pt; font-weight: 700; color: white; line-height: 1.15; margin-bottom: 8px; }
-    .cover-subtitle { font-size: 13pt; color: rgba(255,255,255,0.6); margin-bottom: 28px; }
-    .cover-divider  { border: none; border-top: 1px solid rgba(255,255,255,0.18); margin: 22px 0; }
+    .cover-title    { font-size: 28pt; font-weight: 700; color: var(--navy); line-height: 1.15; margin-bottom: 8px; }
+    .cover-subtitle { font-size: 13pt; color: var(--muted); margin-bottom: 28px; }
+    .cover-divider  { border: none; border-top: 2px solid var(--border); margin: 22px 0; }
 
     .cover-score-row   { display: flex; align-items: center; gap: 28px; margin-bottom: 8px; }
     .cover-score-ring  {
       width: 110px; height: 110px; border-radius: 50%;
-      border: 4px solid rgba(255,255,255,0.25);
+      border: 4px solid var(--navy);
+      background: #f0f4f8;
       display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0;
     }
     .cover-score-num   { font-size: 28pt; font-weight: 700; line-height: 1; }
-    .cover-score-lbl   { font-size: 7pt; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
-    .score-green { color: #4ade80; } .score-amber { color: #fbbf24; } .score-red { color: #f87171; }
+    .cover-score-lbl   { font-size: 7pt; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
+    .score-green { color: #16a34a; } .score-amber { color: #d97706; } .score-red { color: #dc2626; }
 
     .cover-status-badge {
       display: inline-block; padding: 5px 16px; border-radius: 20px;
@@ -119,18 +123,18 @@
     .status-partial       { background: #fef3c7; color: #92400e; }
     .status-non-compliant { background: #fee2e2; color: #991b1b; }
 
-    .cover-status-desc { font-size: 9pt; color: rgba(255,255,255,0.65); line-height: 1.65; max-width: 340px; }
+    .cover-status-desc { font-size: 9pt; color: var(--muted); line-height: 1.65; max-width: 340px; }
 
-    .cover-meta-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 36px; }
-    .cover-meta-label { font-size: 7.5pt; color: rgba(255,255,255,0.45); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
-    .cover-meta-value { font-size: 9.5pt; color: white; font-weight: 600; margin-top: 2px; }
+    .cover-meta-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 36px; }
+    .cover-meta-label { font-size: 7.5pt; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
+    .cover-meta-value { font-size: 9.5pt; color: var(--navy); font-weight: 600; margin-top: 2px; }
 
     .cover-footer {
-      background: rgba(0,0,0,0.28); padding: 13px 40px;
+      background: #f1f5f9; border-top: 1px solid var(--border); padding: 14px 40px;
       display: flex; align-items: center; justify-content: space-between;
     }
-    .cover-footer-disclaimer { font-size: 7.5pt; color: rgba(255,255,255,0.45); max-width: 420px; line-height: 1.5; }
-    .cover-footer-brand      { font-size: 9pt; color: rgba(255,255,255,0.75); font-weight: 700; }
+    .cover-footer-disclaimer { font-size: 7.5pt; color: var(--muted); max-width: 420px; line-height: 1.5; }
+    .cover-footer-brand      { font-size: 9pt; color: var(--navy); font-weight: 700; }
 
     /* ── KPI strip ───────────────────────────────────────────────── */
     .kpi-strip { display: flex; gap: 10px; margin-bottom: 18px; }

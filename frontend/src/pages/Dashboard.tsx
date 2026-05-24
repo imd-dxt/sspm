@@ -3,9 +3,10 @@ import { ShieldCheck, AlertTriangle, Plug, ArrowRight, TrendingUp } from 'lucide
 import {
   RadialBarChart, RadialBar, PolarRadiusAxis, Label,
   AreaChart, Area, XAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
 } from 'recharts'
 import type { ScanRun, IdentityPlatform } from '../api/types'
-import { useFindingSummary, useCrossPlatformFindings } from '../api/findings'
+import { useFindingSummary, useCrossPlatformFindings, useFindingsByCategory } from '../api/findings'
 import { useConnectors } from '../api/connectors'
 import { useScanRuns } from '../api/rules'
 import { useIdentityPlatforms } from '../api/identities'
@@ -224,6 +225,80 @@ function ConnectedPlatformsCard() {
         </Link>
       </div>
       {body}
+    </div>
+  )
+}
+
+// ── Findings by category donut chart ───────────────────────────────────────
+const CATEGORY_COLORS: Record<string, string> = {
+  'Identity / Authentication': '#6366f1',
+  'Data Exposure':             '#ef4444',
+  'Third-Party':               '#f59e0b',
+  'Shadow IT':                 '#8b5cf6',
+  'Others':                    '#94a3b8',
+}
+
+function FindingsByCategoryChart() {
+  const { data, isLoading } = useFindingsByCategory()
+
+  if (isLoading) {
+    return (
+      <div className="kpi-card" style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <div className="skeleton" style={{ width: 100, height: 100, borderRadius: '50%' }} />
+      </div>
+    )
+  }
+
+  const entries = Object.entries(data ?? {}).filter(([, v]) => v > 0)
+  const total = entries.reduce((s, [, v]) => s + v, 0)
+
+  if (total === 0) {
+    return (
+      <div className="kpi-card" style={{ alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+        <div className="kpi-top" style={{ width: '100%' }}>
+          <span className="kpi-label">Finding Types</span>
+        </div>
+        <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', textAlign: 'center' }}>No open findings</p>
+      </div>
+    )
+  }
+
+  const pieData = entries.map(([name, value]) => ({ name, value }))
+
+  return (
+    <div className="kpi-card" style={{ gap: 4 }}>
+      <div className="kpi-top" style={{ width: '100%' }}>
+        <span className="kpi-label">Finding Types</span>
+      </div>
+      <ResponsiveContainer width="100%" height={130}>
+        <PieChart>
+          <Pie
+            data={pieData}
+            dataKey="value"
+            nameKey="name"
+            cx="50%"
+            cy="50%"
+            innerRadius={32}
+            outerRadius={52}
+            paddingAngle={2}
+            strokeWidth={0}
+          >
+            {pieData.map((entry) => (
+              <Cell key={entry.name} fill={CATEGORY_COLORS[entry.name] ?? '#94a3b8'} />
+            ))}
+          </Pie>
+          <Tooltip
+            formatter={(value: number, name: string) => [value, name]}
+            contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 11 }}
+          />
+          <Legend
+            iconType="circle"
+            iconSize={6}
+            wrapperStyle={{ fontSize: '0.5625rem', lineHeight: '1.6', paddingTop: 0 }}
+            formatter={(name) => <span style={{ color: 'var(--text-muted)' }}>{name}</span>}
+          />
+        </PieChart>
+      </ResponsiveContainer>
     </div>
   )
 }
@@ -496,14 +571,15 @@ export default function Dashboard() {
         <PostureScoreKpi summaryQ={summaryQ} postureQ={postureQ} />
         <OpenFindingsKpi summaryQ={summaryQ} />
         <ActiveConnectorsKpi connectorsQ={connectorsQ} />
-        <ConnectedPlatformsCard />
+        <FindingsByCategoryChart />
       </div>
 
       <FindingsTrendCard scanRunsQ={scanRunsQ} />
 
-      {/* Main 2-col grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 300px)', gap: 20, alignItems: 'start' }}>
+      {/* Main 3-col grid: actions | platforms | risks */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 260px) minmax(0, 260px)', gap: 20, alignItems: 'start' }}>
         <PrioritizedActionsCard q={prioritizedQ} />
+        <ConnectedPlatformsCard />
         <CrossPlatformRisksCard q={crossPlatformQ} />
       </div>
     </div>

@@ -35,6 +35,14 @@ export function useFindingSummary(): UseQueryResult<FindingSummary> {
   })
 }
 
+export function useFindingsByCategory(): UseQueryResult<Record<string, number>> {
+  return useQuery({
+    queryKey: ['findings-by-category'],
+    queryFn: () => get<Record<string, number>>('/findings/by-category'),
+    refetchInterval: 60_000,
+  })
+}
+
 export function useCrossPlatformFindings(): UseQueryResult<Finding[]> {
   return useQuery({
     queryKey: ['findings-cross-platform'],

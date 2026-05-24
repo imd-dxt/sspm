@@ -58,6 +58,47 @@ def get_summary(db: DB) -> dict[str, Any]:
     }
 
 
+# ── By category ──────────────────────────────────────────────────────────────
+
+_CATEGORY_BUCKETS = {
+    "Identity / Authentication": ("auth", "identity", "mfa", "access", "sso", "login", "oauth", "credential", "password"),
+    "Data Exposure":             ("data", "exposure", "privacy", "pii", "secret", "token", "encryption", "leak"),
+    "Third-Party":               ("third", "vendor", "partner", "supply", "integration", "external"),
+    "Shadow IT":                 ("shadow", "unmanaged", "unsanctioned", "unauthorized", "rogue"),
+}
+
+
+def _classify_category(category: str | None) -> str:
+    if not category:
+        return "Others"
+    cat = category.lower()
+    for bucket, keywords in _CATEGORY_BUCKETS.items():
+        if any(k in cat for k in keywords):
+            return bucket
+    return "Others"
+
+
+@router.get("/by-category")
+def get_findings_by_category(db: DB) -> dict[str, int]:
+    """Return open finding counts bucketed into display categories."""
+    rows = (
+        db.query(Finding.category, func.count(Finding.id))
+        .filter(Finding.status == "open")
+        .group_by(Finding.category)
+        .all()
+    )
+    buckets: dict[str, int] = {
+        "Identity / Authentication": 0,
+        "Data Exposure": 0,
+        "Third-Party": 0,
+        "Shadow IT": 0,
+        "Others": 0,
+    }
+    for category, count in rows:
+        buckets[_classify_category(category)] += count
+    return {k: v for k, v in buckets.items() if v > 0} or {"Others": 0}
+
+
 # ── Cross-platform ────────────────────────────────────────────────────────────
 
 @router.get("/cross-platform")

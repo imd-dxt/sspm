@@ -254,6 +254,7 @@ function PlatformRadialCard({ platform, scores }: Readonly<{ platform: string; s
         >
           <RadialBar
             dataKey="score"
+            nameKey="name"
             background={{ fill: 'var(--surface-2)' } as Record<string, unknown>}
             cornerRadius={3}
           />

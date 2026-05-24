@@ -311,6 +311,25 @@ def build_grc_report_structure(
 
     heatmap = build_heatmap_matrix(db)
 
+    # ── Real finding counts (used by report KPIs — independent of AI enrichment) ─
+    _all_flat: list[dict] = []
+    for fw in frameworks:
+        _all_flat.extend(failing_by_framework.get(fw, []))
+    _seen_keys: set[tuple] = set()
+    _unique_all: list[dict] = []
+    for _r in _all_flat:
+        _key = (_r.get("name", ""), _r.get("platform", ""))
+        if _key not in _seen_keys:
+            _seen_keys.add(_key)
+            _unique_all.append(_r)
+    finding_counts = {
+        "critical": sum(1 for r in _unique_all if r.get("severity") == "critical"),
+        "high":     sum(1 for r in _unique_all if r.get("severity") == "high"),
+        "medium":   sum(1 for r in _unique_all if r.get("severity") == "medium"),
+        "low":      sum(1 for r in _unique_all if r.get("severity") == "low"),
+        "total":    len(_unique_all),
+    }
+
     # ── AI-generated content ──────────────────────────────────────────────────
     ai_executive_summary = ""
     ai_roadmap_intro = ""
@@ -415,6 +434,7 @@ def build_grc_report_structure(
         "ai_roadmap_intro": ai_roadmap_intro,
         "ai_trend_narrative": ai_trend_narrative,
         "enriched_findings": enriched_findings,
+        "finding_counts": finding_counts,
     }
 
 
