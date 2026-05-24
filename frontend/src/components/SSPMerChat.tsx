@@ -9,10 +9,10 @@ interface Message {
 }
 
 const SUGGESTIONS = [
-  'What are my most critical compliance gaps?',
-  'How do I fix MFA in my GitHub org?',
-  'How do I improve my CIS score?',
-  'Am I audit-ready for SOC 2?',
+  'What are my critical and high findings?',
+  'What controls am I failing for CIS and how do I fix them?',
+  'What actions do I need to take to pass SOC 2?',
+  'Give me a gap analysis of my overall compliance posture',
 ]
 
 export function SSPMerChat() {
@@ -110,7 +110,7 @@ export function SSPMerChat() {
 
             {messages.map((msg, i) => (
               <div
-                key={i}
+                key={`${msg.role}-${i}-${msg.text.slice(0, 8)}`}
                 style={{
                   display: 'flex', gap: 8,
                   flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
@@ -210,8 +210,8 @@ export function SSPMerChat() {
           boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
           transition: 'transform 0.2s, box-shadow 0.2s',
         }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1.08)' }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.transform = 'scale(1)' }}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.08)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)' }}
       >
         {open ? <X size={21} style={{ color: '#fff' }} /> : <Bot size={21} style={{ color: '#fff' }} />}
       </button>

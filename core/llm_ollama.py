@@ -89,6 +89,26 @@ async def _generate(prompt: str) -> str:
         return resp.json().get("response", "").strip()
 
 
+async def _generate_chat(prompt: str) -> str:
+    """Like _generate but with higher token budget for interactive Q&A answers."""
+    if not _ENABLED:
+        raise RuntimeError("Ollama is disabled (OLLAMA_ENABLED=false)")
+
+    payload = {
+        "model": _MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.3,
+            "num_predict": 1024,
+        },
+    }
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        resp = await client.post(f"{_OLLAMA_URL}/api/generate", json=payload)
+        resp.raise_for_status()
+        return resp.json().get("response", "").strip()
+
+
 # ── Prompt builders ───────────────────────────────────────────────────────────
 
 def _safe_finding(finding: dict[str, Any]) -> dict[str, Any]:

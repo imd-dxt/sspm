@@ -576,40 +576,120 @@ def download_full_posture_report(db: DB) -> Response:
 
 @router.post("/ask", response_model=AskResponse)
 async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
-    ctx_lines: list[str] = []
+    sections: list[str] = []
+    ctx_lines: list[str] = []  # kept for _context_aware_fallback
 
-    # ── Workspace context: connected platforms ──────────────────────────────────
+    # ── Section 1: Connected platforms ──────────────────────────────────────────
+    connected_names: list[str] = []
     try:
         connectors = db.query(Connector).all()
-        connected = [c.platform_name for c in connectors if c.connection_ok]
-        all_platforms = [c.platform_name for c in connectors]
-        if connected:
-            ctx_lines.append(f"Connected platforms (healthy): {', '.join(connected)}")
-        elif all_platforms:
-            ctx_lines.append(f"Configured platforms: {', '.join(all_platforms)}")
+        connected_names = [c.platform_name for c in connectors if c.connection_ok]
+        unhealthy = [c.platform_name for c in connectors if not c.connection_ok]
+        plat_line = f"Healthy: {', '.join(connected_names)}" if connected_names else "None connected"
+        if unhealthy:
+            plat_line += f" | Unhealthy: {', '.join(unhealthy)}"
+        sections.append(f"=== CONNECTED PLATFORMS ===\n{plat_line}")
+        if connected_names:
+            ctx_lines.append(f"Connected platforms (healthy): {', '.join(connected_names)}")
     except Exception as exc:
-        log.warning("ask: could not fetch connectors: %s", exc)
+        log.warning("ask: connectors: %s", exc)
 
-    # ── Workspace context: open findings by severity ────────────────────────────
+    # ── Section 2: Compliance scores per platform × framework ───────────────────
     try:
+        engine = ComplianceEngine()
+        score_rows: list[str] = []
+        total_pass = total_fail = 0
+        for plat in connected_names:
+            for fw_key, fw_meta in FRAMEWORKS.items():
+                r = engine.calculate_score(plat, fw_key, db)
+                if r["total_rules"] > 0:
+                    score_rows.append(
+                        f"  {plat} / {fw_meta['name']}: {r['score']}%"
+                        f" ({r['passed_rules']} pass, {r['failed_rules']} fail"
+                        f" out of {r['total_rules']} controls)"
+                    )
+                    total_pass += r["passed_rules"]
+                    total_fail += r["failed_rules"]
+                    ctx_lines.append(
+                        f"  {fw_meta['name']}: {r['score']}% | {r['passed_rules']} pass,"
+                        f" {r['failed_rules']} fail"
+                    )
+        if score_rows:
+            covered = total_pass + total_fail
+            overall = round(total_pass / covered * 100) if covered else 0
+            ctx_lines.insert(0, f"Overall compliance score: {overall}%")
+            sections.append(
+                f"=== COMPLIANCE SCORES ===\nOverall: {overall}%\n" + "\n".join(score_rows)
+            )
+    except Exception as exc:
+        log.warning("ask: scores: %s", exc)
+
+    # ── Section 3: ALL failing controls with remediation steps ──────────────────
+    try:
+        failing_blocks: list[str] = []
+        for plat in connected_names:
+            for fw_key, fw_meta in FRAMEWORKS.items():
+                rules = _collect_failing_rules([plat], fw_key, db)
+                if not rules:
+                    continue
+                block = [f"\n[{plat.upper()} / {fw_meta['name']}]"]
+                for r in rules[:20]:
+                    rem = (r.get("remediation") or "").strip()
+                    line = (
+                        f"  • [{r['severity'].upper()}] {r['name']}"
+                        f" — {r['open_count']} open finding(s)"
+                    )
+                    if rem:
+                        line += f"\n    → Fix: {rem[:250]}"
+                    block.append(line)
+                failing_blocks.append("\n".join(block))
+                top3 = [r["name"] for r in rules[:3]]
+                ctx_lines.append(
+                    f"  {fw_meta['name']} top failures: {', '.join(top3)}"
+                )
+        if failing_blocks:
+            sections.append(
+                "=== FAILING CONTROLS & REMEDIATION STEPS ===\n"
+                + "\n".join(failing_blocks)
+            )
+        else:
+            sections.append("=== FAILING CONTROLS ===\nNone — all assessed controls pass.")
+    except Exception as exc:
+        log.warning("ask: failing controls: %s", exc)
+
+    # ── Section 4: Open findings summary ────────────────────────────────────────
+    try:
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
         sev_totals = (
             db.query(Finding.severity, func.count(Finding.id))
             .filter(Finding.status == "open")
             .group_by(Finding.severity)
             .all()
         )
-        if sev_totals:
-            sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-            sev_sorted = sorted(sev_totals, key=lambda x: sev_order.get(x[0] or "low", 99))
-            sev_str = ", ".join(f"{sev}: {cnt}" for sev, cnt in sev_sorted)
-            total_open = sum(cnt for _, cnt in sev_totals)
-            ctx_lines.append(f"Open findings: {total_open} total ({sev_str})")
-        else:
-            ctx_lines.append("Open findings: 0 (all controls passing or no scan yet)")
+        cat_totals = (
+            db.query(Finding.category, func.count(Finding.id))
+            .filter(Finding.status == "open")
+            .group_by(Finding.category)
+            .all()
+        )
+        total_open = sum(cnt for _, cnt in sev_totals)
+        sev_str = ", ".join(
+            f"{s}: {c}"
+            for s, c in sorted(sev_totals, key=lambda x: sev_order.get(x[0] or "low", 99))
+        )
+        cat_str = ", ".join(
+            f"{(cat or 'Uncategorized')}: {cnt}"
+            for cat, cnt in sorted(cat_totals, key=lambda x: -x[1])[:8]
+        )
+        findings_block = f"Total open: {total_open}\nBy severity: {sev_str}"
+        if cat_str:
+            findings_block += f"\nBy category: {cat_str}"
+        sections.append(f"=== OPEN FINDINGS ===\n{findings_block}")
+        ctx_lines.append(f"Open findings: {total_open} total ({sev_str})")
     except Exception as exc:
-        log.warning("ask: could not fetch findings summary: %s", exc)
+        log.warning("ask: findings summary: %s", exc)
 
-    # ── Workspace context: identity counts per platform ─────────────────────────
+    # ── Section 5: Identities & third-party apps ────────────────────────────────
     try:
         user_counts = (
             db.query(NormalizedEntity.platform, func.count(NormalizedEntity.id))
@@ -623,54 +703,63 @@ async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
             .group_by(NormalizedEntity.platform)
             .all()
         )
-        if user_counts:
-            users_str = ", ".join(f"{plat}: {cnt}" for plat, cnt in user_counts)
-            ctx_lines.append(f"Users per platform: {users_str}")
-        if app_counts:
-            apps_str = ", ".join(f"{plat}: {cnt}" for plat, cnt in app_counts)
-            ctx_lines.append(f"Third-party apps per platform: {apps_str}")
+        ident_lines: list[str] = []
+        for plat, cnt in user_counts:
+            ident_lines.append(f"  {plat}: {cnt} users")
+            ctx_lines.append(f"Users on {plat}: {cnt}")
+        for plat, cnt in app_counts:
+            ident_lines.append(f"  {plat}: {cnt} third-party apps")
+        if ident_lines:
+            sections.append("=== IDENTITIES & THIRD-PARTY APPS ===\n" + "\n".join(ident_lines))
     except Exception as exc:
-        log.warning("ask: could not fetch identity counts: %s", exc)
+        log.warning("ask: identities: %s", exc)
 
-    # ── Compliance scores ────────────────────────────────────────────────────────
-    try:
-        overview = _build_control_report(db)
-        ctx_lines.append(f"Overall compliance score: {overview.overall_score}%")
-        for std in overview.standards:
-            if std.total_controls > 0:
-                failing_names = [c.name for c in std.controls if c.status == "fail"][:3]
-                ctx_lines.append(
-                    f"  {std.name}: {std.score}% | {std.passing_controls} pass, "
-                    f"{std.failing_controls} fail, {std.not_applicable_controls} N/A"
-                    + (f" | Top failures: {', '.join(failing_names)}" if failing_names else "")
-                )
-    except Exception as exc:
-        log.warning("ask: could not build compliance context: %s", exc)
-
+    # ── Section 6: Focused context (when caller passes platform+framework) ───────
     if req.platform and req.framework:
         try:
             engine = ComplianceEngine()
-            result = engine.calculate_score(req.platform, req.framework, db)
+            r = engine.calculate_score(req.platform, req.framework, db)
+            focused_rules = _collect_failing_rules([req.platform], req.framework, db)
+            focused: list[str] = [
+                f"{req.framework} on {req.platform}: {r['score']}%"
+                f" ({r['passed_rules']}/{r['total_rules']} controls passing,"
+                f" {r['failed_rules']} failing)"
+            ]
+            if focused_rules:
+                focused.append("Failing controls with fixes:")
+                for rule in focused_rules:
+                    rem = (rule.get("remediation") or "").strip()[:250]
+                    focused.append(
+                        f"  • [{rule['severity'].upper()}] {rule['name']}"
+                        + (f"\n    Fix: {rem}" if rem else "")
+                    )
+            sections.append("=== FOCUSED CONTEXT ===\n" + "\n".join(focused))
             ctx_lines.append(
-                f"Focused context — {req.framework} on {req.platform}: {result['score']}% "
-                f"({result['passed_rules']}/{result['total_rules']} passing, {result['failed_rules']} failing)"
+                f"Focused — {req.framework} on {req.platform}: {r['score']}%"
+                f" ({r['failed_rules']} failing)"
             )
         except Exception:
             pass
 
-    ctx = "\n".join(ctx_lines) or "No workspace data available yet."
+    ctx_block = "\n\n".join(sections) or "No workspace data available yet."
     prompt = (
-        f"You are SSPMer, an expert AI security advisor embedded in a SaaS Security Posture Management platform. "
-        f"You have full visibility into the organisation's entire workspace: connected platforms, open findings, "
-        f"identity counts, and compliance posture across all frameworks.\n\n"
-        f"Current workspace data:\n{ctx}\n\n"
-        f"User question: {req.question}\n\n"
-        f"Answer concisely (2-4 sentences), professionally, using the real data above where relevant:"
+        "You are SSPMer, an expert AI security advisor embedded in a SaaS Security Posture"
+        " Management platform. You have FULL visibility into the organisation's real-time"
+        " security data provided below.\n"
+        "Rules:\n"
+        "- Answer using ONLY the data in the workspace block — never invent numbers.\n"
+        "- For simple factual questions: answer in 2-3 sentences, citing real values.\n"
+        "- For complex questions (gap analysis, remediation plans, framework requirements,"
+        " prioritization): give a structured answer with bullet points and section headers.\n"
+        "- If the data shows no issues, say so confidently.\n\n"
+        f"WORKSPACE DATA:\n{ctx_block}\n\n"
+        f"USER QUESTION: {req.question}\n\n"
+        "Answer:"
     )
 
     try:
-        from core.llm_ollama import _generate
-        answer = await asyncio.wait_for(_generate(prompt), timeout=28.0)
+        from core.llm_ollama import _generate_chat
+        answer = await asyncio.wait_for(_generate_chat(prompt), timeout=45.0)
         return AskResponse(answer=answer, source="ollama")
     except (Exception, asyncio.TimeoutError) as exc:
         log.warning("AI ask failed: %s", exc)
