@@ -254,15 +254,19 @@ function PlatformRadialCard({ platform, scores }: Readonly<{ platform: string; s
         >
           <RadialBar
             dataKey="score"
-            nameKey="name"
             background={{ fill: 'var(--surface-2)' } as Record<string, unknown>}
             cornerRadius={3}
           />
           <Tooltip
-            formatter={(value: number, name: string) => [`${value}%`, name]}
-            contentStyle={{
-              background: 'var(--surface)', border: '1px solid var(--border)',
-              borderRadius: 8, fontSize: '0.75rem',
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null
+              const item = payload[0]
+              return (
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: '0.75rem' }}>
+                  <strong style={{ color: 'var(--text)' }}>{(item.payload as { name: string }).name}</strong>
+                  <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{item.value}%</span>
+                </div>
+              )
             }}
           />
           <Legend
