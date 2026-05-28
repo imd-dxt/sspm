@@ -11,23 +11,43 @@ export class ApiError extends Error {
   }
 }
 
+function getToken(): string | null {
+  return localStorage.getItem('sspm_token')
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+function handleUnauthorized() {
+  localStorage.removeItem('sspm_token')
+  localStorage.removeItem('sspm_username')
+  // Avoid infinite redirect loop if already on /login
+  if (globalThis.location.pathname.startsWith('/login')) return
+  globalThis.location.href = '/login'
+}
+
 async function parseResponse<T>(res: Response): Promise<T> {
+  if (res.status === 401) {
+    handleUnauthorized()
+    throw new ApiError(401, 'Session expired. Please log in again.', null)
+  }
+
   const contentType = res.headers.get('content-type') ?? ''
   const isJson = contentType.includes('application/json')
   const body = isJson ? await res.json() : await res.text()
 
-  if (!res.ok) {
-    let message = `HTTP ${res.status}`
-    if (isJson && typeof body === 'object' && body !== null) {
-      const b = body as Record<string, unknown>
-      message = (b['detail'] as string) ?? (b['message'] as string) ?? message
-    } else if (typeof body === 'string' && body.length > 0) {
-      message = body
-    }
-    throw new ApiError(res.status, message, body)
-  }
+  if (res.ok) return body as T
 
-  return body as T
+  let message = `HTTP ${res.status}`
+  if (isJson && typeof body === 'object' && body !== null) {
+    const b = body as Record<string, unknown>
+    message = (b['detail'] as string) ?? (b['message'] as string) ?? message
+  } else if (typeof body === 'string' && body.length > 0) {
+    message = body
+  }
+  throw new ApiError(res.status, message, body)
 }
 
 export async function get<T>(path: string, params?: Record<string, string | number | boolean | undefined>): Promise<T> {
@@ -41,7 +61,7 @@ export async function get<T>(path: string, params?: Record<string, string | numb
     if (s) url += `?${s}`
   }
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
   })
   return parseResponse<T>(res)
 }
@@ -62,7 +82,7 @@ export async function post<T>(
   }
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: data !== undefined ? JSON.stringify(data) : undefined,
   })
   return parseResponse<T>(res)
@@ -71,7 +91,7 @@ export async function post<T>(
 export async function put<T>(path: string, data?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: data !== undefined ? JSON.stringify(data) : undefined,
   })
   return parseResponse<T>(res)
@@ -80,7 +100,7 @@ export async function put<T>(path: string, data?: unknown): Promise<T> {
 export async function patch<T>(path: string, data?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: data !== undefined ? JSON.stringify(data) : undefined,
   })
   return parseResponse<T>(res)
@@ -89,7 +109,17 @@ export async function patch<T>(path: string, data?: unknown): Promise<T> {
 export async function del<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
   })
   return parseResponse<T>(res)
+}
+
+/** Direct login call — uses no auth header (pre-auth) */
+export async function loginRequest(username: string, password: string): Promise<{ access_token: string; username: string; expires_in: number }> {
+  const res = await fetch(`${BASE}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  return parseResponse(res)
 }

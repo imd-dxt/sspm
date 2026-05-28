@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   Plug,
@@ -12,8 +12,10 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ClipboardList,
+  LogOut,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { useAuth } from '../../context/AuthContext'
 
 interface NavItem {
   to: string
@@ -37,6 +39,13 @@ const SIDEBAR_COLLAPSED_W = '64px'
 
 export default function Sidebar() {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { username, logout } = useAuth()
+
+  function handleLogout() {
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   const [dark, setDark] = useState<boolean>(() => {
     try {
@@ -96,6 +105,28 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="sidebar-footer">
+        {/* Logged-in user */}
+        {!collapsed && username && (
+          <div style={{
+            padding: '6px 14px 2px',
+            fontSize: '0.625rem', color: 'var(--sidebar-text)',
+            textTransform: 'uppercase', letterSpacing: '0.07em', opacity: 0.55,
+          }}>
+            {username}
+          </div>
+        )}
+
+        <button
+          onClick={handleLogout}
+          className="nav-item"
+          aria-label="Sign out"
+          title={collapsed ? 'Sign out' : undefined}
+          style={{ width: '100%' }}
+        >
+          <span className="nav-icon"><LogOut size={16} /></span>
+          <span className="nav-label">Sign out</span>
+        </button>
+
         <button
           onClick={() => setCollapsed((c) => !c)}
           className="nav-item"
@@ -108,6 +139,7 @@ export default function Sidebar() {
           </span>
           <span className="nav-label">Collapse</span>
         </button>
+
         <button
           onClick={() => setDark((d) => !d)}
           className="nav-item"

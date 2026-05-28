@@ -1,6 +1,9 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { AuthProvider } from './context/AuthContext'
+import { ProtectedRoute } from './components/ProtectedRoute'
 import Layout from './components/layout/Layout'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Connectors from './pages/Connectors'
 import ConnectorDetail from './pages/ConnectorDetail'
@@ -26,23 +29,31 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="connectors" element={<Connectors />} />
-            <Route path="connectors/:id" element={<ConnectorDetail />} />
-            <Route path="findings" element={<Findings />} />
-            <Route path="rules" element={<Rules />} />
-            <Route path="identities" element={<Identities />} />
-            <Route path="identities/:platform" element={<IdentityDetail />} />
-            <Route path="third-party-apps" element={<ThirdPartyApps />} />
-            <Route path="compliance" element={<Compliance />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            {/* Public */}
+            <Route path="/login" element={<Login />} />
+
+            {/* Protected — all app routes require authentication */}
+            <Route element={<ProtectedRoute />}>
+              <Route element={<Layout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="connectors" element={<Connectors />} />
+                <Route path="connectors/:id" element={<ConnectorDetail />} />
+                <Route path="findings" element={<Findings />} />
+                <Route path="rules" element={<Rules />} />
+                <Route path="identities" element={<Identities />} />
+                <Route path="identities/:platform" element={<IdentityDetail />} />
+                <Route path="third-party-apps" element={<ThirdPartyApps />} />
+                <Route path="compliance" element={<Compliance />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Route>
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
     </QueryClientProvider>
   )
 }

@@ -64,6 +64,19 @@ class Settings(BaseSettings):
     default_rate_limit_rps: float = 5.0
     github_rate_limit_rps: float = 1.38  # 5000/hour ≈ 1.38/s
 
+    # ── Authentication ────────────────────────────────────────────────────────
+    # JWT signing secret — auto-generated per-session if left empty (tokens
+    # will not survive restarts). Set a stable value in production.
+    jwt_secret: str = ""
+    jwt_algorithm: str = "HS256"
+    jwt_expire_minutes: int = 480  # 8 hours
+
+    # Admin account — set via environment variables, never hardcode values here.
+    # Priority: ADMIN_PASSWORD_HASH > ADMIN_PASSWORD > auto-generated.
+    admin_username: str = "admin"
+    admin_password_hash: str = ""   # bcrypt hash of the password (preferred)
+    admin_password: str = ""        # plain text — hashed at startup if hash not set
+
     # ── Scan behaviour ────────────────────────────────────────────────────────
     scan_timeout_seconds: int = 300
     max_retries: int = 3

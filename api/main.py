@@ -10,13 +10,14 @@ import logging
 
 import structlog
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Response
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config.logging_config import configure_logging
 from config.settings import settings
-from api.routes import connectors, findings, rules, scan_runs, third_party_apps, identities, activity_logs, posture, compliance
+from api.auth import get_current_user
+from api.routes import auth, connectors, findings, rules, scan_runs, third_party_apps, identities, activity_logs, posture, compliance
 
 API_V1 = "/api/v1"
 
@@ -169,15 +170,20 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 # ── Routers ───────────────────────────────────────────────────────────────────
 
-app.include_router(connectors.router, prefix=API_V1)
-app.include_router(findings.router, prefix=API_V1)
-app.include_router(rules.router, prefix=API_V1)
-app.include_router(scan_runs.router, prefix=API_V1)
-app.include_router(third_party_apps.router, prefix=API_V1)
-app.include_router(identities.router, prefix=API_V1)
-app.include_router(activity_logs.router, prefix=API_V1)
-app.include_router(posture.router, prefix=API_V1)
-app.include_router(compliance.router, prefix=API_V1)
+# Auth router is public (no token required for login)
+app.include_router(auth.router, prefix=API_V1)
+
+# All other routers require a valid JWT
+_auth_dep = [Depends(get_current_user)]
+app.include_router(connectors.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(findings.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(rules.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(scan_runs.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(third_party_apps.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(identities.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(activity_logs.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(posture.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(compliance.router, prefix=API_V1, dependencies=_auth_dep)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────
