@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ShieldCheck, Eye, EyeOff, Loader } from 'lucide-react'
+import { Eye, EyeOff, Loader } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { loginRequest, ApiError } from '../api/client'
 
@@ -24,9 +24,11 @@ export default function Login() {
       login(data.access_token, data.username)
       navigate('/', { replace: true })
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 401
-        ? 'Invalid username or password.'
-        : 'Could not reach the server. Please try again.')
+      setError(
+        err instanceof ApiError && err.status === 401
+          ? 'Invalid username or password.'
+          : 'Could not reach the server. Please try again.',
+      )
     } finally {
       setLoading(false)
     }
@@ -34,48 +36,98 @@ export default function Login() {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'var(--bg)', padding: 24,
+      minHeight: '100vh',
+      display: 'flex',
+      background: 'var(--bg)',
     }}>
-      <div style={{ width: '100%', maxWidth: 400, display: 'flex', flexDirection: 'column', gap: 0 }}>
 
-        {/* Brand header */}
+      {/* ── Left panel: logo ───────────────────────────────────────────── */}
+      <div style={{
+        flex: '0 0 55%',
+        background: '#0B0875',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '48px 64px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* Subtle background decoration */}
         <div style={{
-          background: '#0B0875', borderRadius: '12px 12px 0 0',
-          padding: '28px 32px 24px', textAlign: 'center',
-        }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: '50%',
-            background: 'rgba(255,255,255,0.12)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 14px',
+          position: 'absolute', inset: 0,
+          background: 'radial-gradient(ellipse at 60% 40%, rgba(74,143,232,0.12) 0%, transparent 70%)',
+          pointerEvents: 'none',
+        }} />
+
+        {/* SSPM SVG logo */}
+        <div style={{ width: '100%', maxWidth: 380, position: 'relative', zIndex: 1 }}>
+          <img
+            src="/sspm_logo.svg"
+            alt="SSPM"
+            style={{ width: '100%', height: 'auto', display: 'block' }}
+          />
+        </div>
+
+        {/* Tagline below logo */}
+        <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', marginTop: 8 }}>
+          <p style={{
+            fontSize: '1rem', color: 'rgba(255,255,255,0.55)',
+            letterSpacing: '0.04em', fontWeight: 400,
           }}>
-            <ShieldCheck size={26} style={{ color: '#fff' }} />
-          </div>
-          <p style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fff', lineHeight: 1 }}>SSPMer</p>
-          <p style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.55)', marginTop: 6 }}>
             SaaS Security Posture Management
+          </p>
+          <p style={{
+            fontSize: '0.75rem', color: 'rgba(255,255,255,0.3)',
+            marginTop: 6, letterSpacing: '0.02em',
+          }}>
+            Automated compliance · Real-time risk · AI-driven insights
           </p>
         </div>
 
-        {/* Form card */}
+        {/* Bottom HPS brand */}
         <div style={{
-          background: 'var(--surface)', border: '1px solid var(--border)',
-          borderTop: 'none', borderRadius: '0 0 12px 12px',
-          padding: '28px 32px',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.08)',
+          position: 'absolute', bottom: 28, left: 0, right: 0,
+          textAlign: 'center', zIndex: 1,
         }}>
-          <p style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>
-            Sign in
+          <p style={{ fontSize: '0.6875rem', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.08em' }}>
+            POWERED BY HPS
           </p>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 22 }}>
-            Administrator access only
-          </p>
+        </div>
+      </div>
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      {/* ── Right panel: login form ────────────────────────────────────── */}
+      <div style={{
+        flex: '0 0 45%',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        padding: '48px 56px',
+        background: 'var(--surface)',
+      }}>
+        <div style={{ width: '100%', maxWidth: 460 }}>
+
+          {/* Header */}
+          <div style={{ marginBottom: 36 }}>
+            <p style={{
+              fontSize: '1.75rem', fontWeight: 700,
+              color: 'var(--text)', lineHeight: 1.15, marginBottom: 8,
+            }}>
+              Sign in
+            </p>
+            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+              Administrator access — enter your credentials to continue.
+            </p>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+
             {/* Username */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label style={{
+                fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text)',
+              }}>
                 Username
               </label>
               <input
@@ -87,10 +139,10 @@ export default function Login() {
                 disabled={loading}
                 placeholder="admin"
                 style={{
-                  padding: '9px 12px', borderRadius: 8, fontSize: '0.875rem',
-                  border: '1px solid var(--border)', background: 'var(--surface-2)',
+                  padding: '11px 14px', borderRadius: 9, fontSize: '0.9375rem',
+                  border: '1.5px solid var(--border)', background: 'var(--surface-2)',
                   color: 'var(--text)', outline: 'none', width: '100%',
-                  boxSizing: 'border-box',
+                  boxSizing: 'border-box', transition: 'border-color 0.15s',
                 }}
                 onFocus={(e) => { e.target.style.borderColor = '#0B0875' }}
                 onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
@@ -98,8 +150,10 @@ export default function Login() {
             </div>
 
             {/* Password */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <label style={{
+                fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text)',
+              }}>
                 Password
               </label>
               <div style={{ position: 'relative' }}>
@@ -110,10 +164,10 @@ export default function Login() {
                   autoComplete="current-password"
                   disabled={loading}
                   style={{
-                    padding: '9px 40px 9px 12px', borderRadius: 8, fontSize: '0.875rem',
-                    border: '1px solid var(--border)', background: 'var(--surface-2)',
+                    padding: '11px 44px 11px 14px', borderRadius: 9, fontSize: '0.9375rem',
+                    border: '1.5px solid var(--border)', background: 'var(--surface-2)',
                     color: 'var(--text)', outline: 'none', width: '100%',
-                    boxSizing: 'border-box',
+                    boxSizing: 'border-box', transition: 'border-color 0.15s',
                   }}
                   onFocus={(e) => { e.target.style.borderColor = '#0B0875' }}
                   onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
@@ -123,22 +177,24 @@ export default function Login() {
                   onClick={() => setShowPwd((v) => !v)}
                   tabIndex={-1}
                   style={{
-                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                    position: 'absolute', right: 12, top: '50%',
+                    transform: 'translateY(-50%)',
                     background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--text-muted)', padding: 2, display: 'flex',
+                    color: 'var(--text-muted)', padding: 2,
+                    display: 'flex', alignItems: 'center',
                   }}
                 >
-                  {showPwd ? <EyeOff size={15} /> : <Eye size={15} />}
+                  {showPwd ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
             </div>
 
-            {/* Error message */}
+            {/* Error */}
             {error && (
               <p style={{
-                fontSize: '0.75rem', color: 'var(--sev-critical)',
+                fontSize: '0.8125rem', color: 'var(--sev-critical)',
                 background: 'color-mix(in oklch, var(--sev-critical) 8%, transparent)',
-                padding: '8px 12px', borderRadius: 7,
+                padding: '10px 14px', borderRadius: 8, margin: 0,
               }}>
                 {error}
               </p>
@@ -149,21 +205,37 @@ export default function Login() {
               type="submit"
               disabled={loading || !username.trim() || !password}
               style={{
-                marginTop: 4, padding: '10px 0', borderRadius: 8,
+                marginTop: 6, padding: '13px 0', borderRadius: 9,
                 background: '#0B0875', color: '#fff', fontWeight: 700,
-                fontSize: '0.875rem', border: 'none', cursor: 'pointer',
+                fontSize: '0.9375rem', border: 'none', cursor: 'pointer',
                 opacity: loading || !username.trim() || !password ? 0.5 : 1,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                transition: 'opacity 0.15s',
+                transition: 'opacity 0.15s, background 0.15s',
+                letterSpacing: '0.01em',
               }}
+              onMouseEnter={(e) => {
+                if (!loading && username.trim() && password)
+                  e.currentTarget.style.background = '#0e0fa8'
+              }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = '#0B0875' }}
             >
-              {loading && <Loader size={14} className="animate-spin" />}
+              {loading && <Loader size={15} className="animate-spin" />}
               {loading ? 'Signing in…' : 'Sign in'}
             </button>
-          </form>
-        </div>
 
+          </form>
+
+          {/* Footer note */}
+          <p style={{
+            marginTop: 32, fontSize: '0.6875rem',
+            color: 'var(--text-muted)', lineHeight: 1.6,
+          }}>
+            This platform is restricted to authorised personnel only.
+            Unauthorised access attempts are logged and monitored.
+          </p>
+        </div>
       </div>
+
     </div>
   )
 }

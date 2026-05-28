@@ -1,0 +1,47 @@
+<svg width="100%" viewBox="0 0 680 480" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>SSPM logo – professional mark</title>
+<defs>
+  <clipPath id="hex">
+    <path d="M340 60 L430 110 L430 240 Q430 330 340 370 Q250 330 250 240 L250 110 Z"/>
+  </clipPath>
+<mask id="imagine-text-gaps-on8nzh" maskUnits="userSpaceOnUse"><rect x="0" y="0" width="680" height="480" fill="white"/><rect x="237.9204559326172" y="359.4545593261719" width="204.1591033935547" height="81.09091186523438" fill="black" rx="2"/></mask></defs>
+
+<!-- SHIELD -->
+<path d="M340 54 L437 107 L437 242 Q437 338 340 380 Q243 338 243 242 L243 107 Z" fill="none" stroke="#1A1A2E" stroke-width="3" opacity="0.12" mask="url(#imagine-text-gaps-on8nzh)"/>
+<path d="M340 62 L430 112 L430 242 Q430 328 340 368 Q250 328 250 242 L250 112 Z" fill="#0F1630"/>
+<path d="M340 78 L416 122 L416 242 Q416 316 340 352 Q264 316 264 242 L264 122 Z" fill="#141E40"/>
+<rect x="250" y="112" width="180" height="6" rx="0" fill="#F47920" opacity="1"/>
+
+<!-- GRAPH EDGES -->
+<line x1="340" y1="218" x2="296" y2="174" stroke="#2E5FA3" stroke-width="1.8" opacity="0.9"/>
+<line x1="340" y1="218" x2="384" y2="174" stroke="#2E5FA3" stroke-width="1.8" opacity="0.9"/>
+<line x1="340" y1="218" x2="298" y2="264" stroke="#2E5FA3" stroke-width="1.5" opacity="0.75"/>
+<line x1="340" y1="218" x2="382" y2="264" stroke="#2E5FA3" stroke-width="1.5" opacity="0.75"/>
+<line x1="340" y1="218" x2="340" y2="288" stroke="#2E5FA3" stroke-width="1.4" opacity="0.65"/>
+<line x1="296" y1="174" x2="384" y2="174" stroke="#3A6BBC" stroke-width="1.0" opacity="0.55"/>
+<line x1="296" y1="174" x2="298" y2="264" stroke="#3A6BBC" stroke-width="0.9" opacity="0.45"/>
+<line x1="384" y1="174" x2="382" y2="264" stroke="#3A6BBC" stroke-width="0.9" opacity="0.45"/>
+<line x1="298" y1="264" x2="340" y2="288" stroke="#3A6BBC" stroke-width="0.8" opacity="0.4"/>
+<line x1="382" y1="264" x2="340" y2="288" stroke="#3A6BBC" stroke-width="0.8" opacity="0.4"/>
+
+<!-- SATELLITE NODES -->
+<circle cx="296" cy="174" r="13" fill="#0F1630" stroke="#2E5FA3" stroke-width="1.5"/>
+<circle cx="384" cy="174" r="13" fill="#0F1630" stroke="#2E5FA3" stroke-width="1.5"/>
+<circle cx="298" cy="264" r="11" fill="#0F1630" stroke="#3A6BBC" stroke-width="1.2"/>
+<circle cx="382" cy="264" r="11" fill="#0F1630" stroke="#3A6BBC" stroke-width="1.2"/>
+<circle cx="340" cy="288" r="10" fill="#0F1630" stroke="#3A6BBC" stroke-width="1.2"/>
+<circle cx="296" cy="174" r="7" fill="#2E5FA3"/>
+<circle cx="384" cy="174" r="7" fill="#2E5FA3"/>
+<circle cx="298" cy="264" r="6" fill="#3A6BBC"/>
+<circle cx="382" cy="264" r="6" fill="#3A6BBC"/>
+<circle cx="340" cy="288" r="5.5" fill="#3A6BBC"/>
+
+<!-- CENTER NODE -->
+<circle cx="340" cy="218" r="20" fill="#0F1630" stroke="#4A8FE8" stroke-width="2"/>
+<circle cx="340" cy="218" r="13" fill="#2E5FA3"/>
+<circle cx="340" cy="218" r="7" fill="#5AA0F0"/>
+
+<!-- WORDMARK -->
+<text x="340" y="424" font-family="system-ui, -apple-system, 'Helvetica Neue', sans-serif" font-size="58" font-weight="700" letter-spacing="10" text-anchor="middle" fill="#0F1630">SSPM</text>
+<line x1="290" y1="435" x2="390" y2="435" stroke="#F47920" stroke-width="2.5" stroke-linecap="round" mask="url(#imagine-text-gaps-on8nzh)"/>
+</svg>
