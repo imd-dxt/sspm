@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { ApiError } from './api/client'
 import { AuthProvider } from './context/AuthContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import Layout from './components/layout/Layout'
@@ -18,7 +19,11 @@ import Compliance from './pages/Compliance'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 2,
+      retry: (failureCount, error) => {
+        // Never retry on auth failures — they won't recover.
+        if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return false
+        return failureCount < 2
+      },
       retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 10_000),
       staleTime: 20_000,
       gcTime: 5 * 60 * 1000,

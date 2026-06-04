@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react'
 
 interface AuthState {
   token: string | null
@@ -33,6 +33,19 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     localStorage.removeItem('sspm_token')
     localStorage.removeItem('sspm_username')
     setAuth({ token: null, username: null })
+  }, [])
+
+  // Listen for 401s dispatched from the API client. This avoids a hard
+  // window.location redirect, which would wipe the SPA mid-login.
+  useEffect(() => {
+    function handleAuthLogout() {
+      console.warn('[Auth] Received 401 → clearing session')
+      localStorage.removeItem('sspm_token')
+      localStorage.removeItem('sspm_username')
+      setAuth({ token: null, username: null })
+    }
+    window.addEventListener('auth:logout', handleAuthLogout)
+    return () => window.removeEventListener('auth:logout', handleAuthLogout)
   }, [])
 
   return (

@@ -20,17 +20,20 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
-function handleUnauthorized() {
-  localStorage.removeItem('sspm_token')
-  localStorage.removeItem('sspm_username')
-  // Avoid infinite redirect loop if already on /login
-  if (globalThis.location.pathname.startsWith('/login')) return
-  globalThis.location.href = '/login'
+function handleUnauthorized(url: string) {
+  console.warn(`[Auth] 401 from ${url} — clearing token`)
+  // Dispatch an event so the AuthProvider can update React state and let
+  // <ProtectedRoute> redirect through React Router (no hard window reload).
+  globalThis.dispatchEvent(new CustomEvent('auth:logout'))
 }
 
 async function parseResponse<T>(res: Response): Promise<T> {
-  if (res.status === 401) {
-    handleUnauthorized()
+  // Login endpoint returns 401 on bad credentials — DON'T treat that as a
+  // session expiry. Only fire the logout flow for OTHER endpoints.
+  const isLoginRequest = res.url.endsWith('/auth/login')
+
+  if (res.status === 401 && !isLoginRequest) {
+    handleUnauthorized(res.url)
     throw new ApiError(401, 'Session expired. Please log in again.', null)
   }
 
