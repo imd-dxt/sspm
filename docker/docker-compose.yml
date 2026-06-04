@@ -109,17 +109,30 @@ services:
         condition: service_healthy
       ollama:
         condition: service_started
-    # Load ALL .env vars into the container as-is (no interpolation, so bcrypt
-    # hashes containing $ characters pass through unchanged).
-    env_file:
-      - ../.env
     environment:
-      # These OVERRIDE values from .env so the container reaches sibling services
-      # via the docker network instead of localhost.
-      POSTGRES_URL:  postgresql://${POSTGRES_USER:-sspm}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sspm}
-      NEO4J_URI:     bolt://neo4j:7687
-      REDIS_URL:     redis://redis:6379/0
-      OLLAMA_URL:    http://ollama:11434
+      # Sibling services reached via docker network names (not localhost):
+      POSTGRES_URL:         postgresql://${POSTGRES_USER:-sspm}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-sspm}
+      NEO4J_URI:            bolt://neo4j:7687
+      NEO4J_USER:           ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD:       ${NEO4J_PASSWORD}
+      REDIS_URL:            redis://redis:6379/0
+      ENCRYPTION_KEY:       ${ENCRYPTION_KEY}
+      LOG_LEVEL:            ${LOG_LEVEL:-INFO}
+      LOG_FORMAT:           ${LOG_FORMAT:-json}
+      OLLAMA_URL:           http://ollama:11434
+      OLLAMA_MODEL:         ${OLLAMA_MODEL:-llama3.2}
+      OLLAMA_TIMEOUT:       ${OLLAMA_TIMEOUT:-120}
+      DEEPSEEK_API_KEY:     ${DEEPSEEK_API_KEY:-}
+      # ── Auth — credentials passed from /opt/sspm/.env ────────────────────────
+      # IMPORTANT: For ADMIN_PASSWORD_HASH, escape every $ as $$ in .env, e.g.:
+      #   ADMIN_PASSWORD_HASH=$$2a$$12$$/Ter6C3hi...
+      # because compose interpolates $ before passing to the container.
+      # Simpler: use ADMIN_PASSWORD (plain) instead — hashed by passlib at startup.
+      ADMIN_USERNAME:       ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD:       ${ADMIN_PASSWORD:-}
+      ADMIN_PASSWORD_HASH:  ${ADMIN_PASSWORD_HASH:-}
+      JWT_SECRET:           ${JWT_SECRET:-}
+      JWT_EXPIRE_MINUTES:   ${JWT_EXPIRE_MINUTES:-480}
     ports:
       - "8000:8000"
     networks:
