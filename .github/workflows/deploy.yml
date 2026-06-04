@@ -127,6 +127,18 @@ jobs:
             docker pull ghcr.io/$GITHUB_REPOSITORY:latest
             docker pull ghcr.io/$GITHUB_REPOSITORY-frontend:latest
 
+            # Remove any containers whose names clash but belong to a different
+            # compose project (happens if compose was ever invoked from /opt/sspm/docker
+            # or with a different --project-directory). Without this, `up -d` fails
+            # with "container name already in use".
+            for c in sspm_postgres sspm_neo4j sspm_redis sspm_ollama sspm_api sspm_frontend; do
+              proj=$(docker inspect "$c" --format '{{ index .Config.Labels "com.docker.compose.project" }}' 2>/dev/null || echo "")
+              if [ -n "$proj" ] && [ "$proj" != "sspm" ]; then
+                echo "Removing orphan $c (was in project '$proj', expected 'sspm')"
+                docker rm -f "$c" || true
+              fi
+            done
+
             # Ensure infra is running (idempotent — skips healthy containers)
             docker compose --project-directory . -f docker/docker-compose.yml up -d postgres neo4j redis ollama
 
