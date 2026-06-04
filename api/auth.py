@@ -10,9 +10,11 @@ Usage in routes:
 """
 from __future__ import annotations
 
+import os
 import secrets
 import logging
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
@@ -25,21 +27,53 @@ log = logging.getLogger(__name__)
 
 _bearer = HTTPBearer(auto_error=True)
 
+# Shared file location so concurrent uvicorn workers agree on the same
+# auto-generated secret. Kept inside the container's app dir (not /tmp) to
+# avoid sharing a world-writable directory.
+_JWT_SECRET_FILE = Path("/app/.jwt_secret")
+
 
 def _resolve_jwt_secret() -> str:
+    """
+    Resolution order:
+      1. JWT_SECRET env var (preferred — persists across restarts)
+      2. Shared file /tmp/sspm_jwt_secret (lets multi-worker uvicorn agree)
+      3. Generate a new secret, write atomically to the shared file
+    """
     if settings.jwt_secret:
+        log.info("JWT_SECRET loaded from environment (persistent across restarts)")
         return settings.jwt_secret
+
+    # Try to read an existing shared secret (another worker may have written it)
+    try:
+        if _JWT_SECRET_FILE.exists():
+            existing = _JWT_SECRET_FILE.read_text().strip()
+            if existing:
+                log.info("JWT_SECRET loaded from shared file %s", _JWT_SECRET_FILE)
+                return existing
+    except OSError as exc:
+        log.warning("Could not read %s: %s", _JWT_SECRET_FILE, exc)
+
+    # Atomically create the file with our secret. If another worker beats us
+    # (FileExistsError), read its value instead so all workers agree.
     generated = secrets.token_hex(32)
-    log.warning("=" * 68)
-    log.warning("JWT_SECRET not set in environment — using an auto-generated secret.")
-    log.warning("⚠ CRITICAL: with uvicorn --workers > 1, EACH worker generates")
-    log.warning("  its own secret. Tokens signed by one worker WILL be rejected")
-    log.warning("  by another (HTTP 401). Login will appear to succeed but every")
-    log.warning("  subsequent request fails.")
-    log.warning("  → Set JWT_SECRET in .env to a stable hex string:")
-    log.warning("      python -c 'import secrets; print(secrets.token_hex(32))'")
-    log.warning("=" * 68)
-    return generated
+    try:
+        fd = os.open(str(_JWT_SECRET_FILE), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(generated)
+        log.warning("=" * 68)
+        log.warning("JWT_SECRET not set in environment — generated one for this container.")
+        log.warning("Secret persisted to %s and shared across uvicorn workers.", _JWT_SECRET_FILE)
+        log.warning("Tokens WILL be invalidated when the container restarts.")
+        log.warning("Set JWT_SECRET in .env for tokens that survive restarts:")
+        log.warning("    openssl rand -hex 32")
+        log.warning("=" * 68)
+        return generated
+    except FileExistsError:
+        # Another worker raced us — use whatever it wrote.
+        existing = _JWT_SECRET_FILE.read_text().strip()
+        log.info("Another worker wrote JWT_SECRET first — using its value")
+        return existing
 
 
 _JWT_SECRET: str = _resolve_jwt_secret()

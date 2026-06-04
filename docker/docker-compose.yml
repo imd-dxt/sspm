@@ -137,9 +137,11 @@ services:
       - "8000:8000"
     networks:
       - sspm_net
+    # Single worker on purpose — auto-generated JWT secrets would otherwise
+    # differ between workers and cause every authenticated request to 401.
     command: >
       sh -c "alembic upgrade head &&
-             uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 2"
+             uvicorn api.main:app --host 0.0.0.0 --port 8000 --workers 1"
 
 volumes:
   postgres_data:
