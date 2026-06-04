@@ -30,11 +30,15 @@ def _resolve_jwt_secret() -> str:
     if settings.jwt_secret:
         return settings.jwt_secret
     generated = secrets.token_hex(32)
-    log.warning(
-        "JWT_SECRET not set — using an auto-generated secret. "
-        "Tokens will be invalidated on every restart. "
-        "Set JWT_SECRET in .env for persistent sessions."
-    )
+    log.warning("=" * 68)
+    log.warning("JWT_SECRET not set in environment — using an auto-generated secret.")
+    log.warning("⚠ CRITICAL: with uvicorn --workers > 1, EACH worker generates")
+    log.warning("  its own secret. Tokens signed by one worker WILL be rejected")
+    log.warning("  by another (HTTP 401). Login will appear to succeed but every")
+    log.warning("  subsequent request fails.")
+    log.warning("  → Set JWT_SECRET in .env to a stable hex string:")
+    log.warning("      python -c 'import secrets; print(secrets.token_hex(32))'")
+    log.warning("=" * 68)
     return generated
 
 
