@@ -76,6 +76,17 @@ export function useSetConnectorSchedule() {
   })
 }
 
+export function useUpdateConnectorCredentials() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, credentials }: { id: string; credentials: Record<string, string> }) =>
+      patch<Connector>(`/connectors/${id}/credentials`, { credentials }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: CONNECTORS_KEY })
+    },
+  })
+}
+
 export function useDeleteConnector() {
   const queryClient = useQueryClient()
   return useMutation({

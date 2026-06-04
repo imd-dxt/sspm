@@ -1,94 +1,31 @@
 <div class="cover no-break">
 
-  <!-- Navy top band with HPS logo -->
-  <div class="cover-top-band">
+  <!-- HPS logo, centered top -->
+  <div class="cover-logo-wrap">
     {% if logo_url %}
-    <img src="{{ logo_url }}" alt="HPS">
+    <img src="{{ logo_url }}" alt="HPS" class="cover-logo-img">
     {% else %}
-    <span class="cover-top-band-hps">HPS</span>
+    <span class="cover-logo-text">HPS</span>
     {% endif %}
-    <div class="cover-top-tagline">
-      SaaS Security Posture Management<br>
-      <span style="color:rgba(255,255,255,0.45);">Automated Compliance &amp; Risk Assessment</span>
-    </div>
   </div>
 
-  <!-- Thin blue gradient accent stripe -->
-  <div class="cover-accent-stripe"></div>
+  <!-- Decorative navy accent line -->
+  <div class="cover-accent-line"></div>
 
-  <!-- White body -->
-  <div class="cover-body">
-
+  <!-- Title block, centered -->
+  <div class="cover-title-block">
     <span class="cover-classification">{{ classification | default('Confidential') }}</span>
-
-    <div class="cover-title">Cybersecurity<br>Compliance Report</div>
-    <div class="cover-subtitle">SaaS Security Posture Assessment</div>
-
-    <hr class="cover-divider">
-
-    <!-- Score ring + status -->
-    <div class="cover-score-row">
-      <div class="cover-score-ring">
-        <div class="cover-score-num score-{{ overall_status | default('amber') }}">{{ overall_score | default(0) }}%</div>
-        <div class="cover-score-lbl">Overall Score</div>
-      </div>
-      <div>
-        {% if overall_score | default(0) >= 80 %}
-          <div class="cover-status-badge status-compliant">&#10003;&nbsp; Compliant</div>
-        {% elif overall_score | default(0) >= 60 %}
-          <div class="cover-status-badge status-partial">&#9888;&nbsp; Partially Compliant</div>
-        {% else %}
-          <div class="cover-status-badge status-non-compliant">&#10007;&nbsp; Non-Compliant</div>
-        {% endif %}
-        <div class="cover-status-desc">
-          Assessment covers {{ platforms | length }} connected platform(s) across
-          {{ frameworks | length }} compliance framework(s).
-          Findings reflect the security posture as of the report date.
-        </div>
-      </div>
-    </div>
-
-    <hr class="cover-divider">
-
-    <!-- Metadata grid -->
-    <div class="cover-meta-grid">
-      <div>
-        <div class="cover-meta-label">Client / Organisation</div>
-        <div class="cover-meta-value">{{ organisation_name | default('Your Organisation') }}</div>
-      </div>
-      <div>
-        <div class="cover-meta-label">Report Date</div>
-        <div class="cover-meta-value">{{ generated_at | default('') }}</div>
-      </div>
-      <div>
-        <div class="cover-meta-label">Platforms Assessed</div>
-        <div class="cover-meta-value">
-          {% for p in platforms %}{{ p | title }}{% if not loop.last %}, {% endif %}{% endfor %}
-        </div>
-      </div>
-      <div>
-        <div class="cover-meta-label">Frameworks</div>
-        <div class="cover-meta-value">
-          {% for f in frameworks %}{{ framework_names.get(f, f) }}{% if not loop.last %}, {% endif %}{% endfor %}
-        </div>
-      </div>
-      <div>
-        <div class="cover-meta-label">Report Period</div>
-        <div class="cover-meta-value">Last {{ report_period_days | default(30) }} days</div>
-      </div>
-      <div>
-        <div class="cover-meta-label">Total Findings</div>
-        <div class="cover-meta-value">{{ failed_rules | default(0) }} open &nbsp;/&nbsp; {{ passed_rules | default(0) }} passing</div>
-      </div>
-    </div>
-
+    <h1 class="cover-title">Cybersecurity<br>Compliance Report</h1>
+    <p class="cover-subtitle">SaaS Security Posture Assessment</p>
   </div>
 
-  <!-- Light footer -->
+  <!-- Light footer with org and date -->
   <div class="cover-footer">
-    <div class="cover-footer-disclaimer">
-      This report contains sensitive security information. Distribution is restricted
-      to authorised personnel only. Do not copy or forward without written approval.
+    <div class="cover-footer-org">
+      {{ organisation_name | default('Your Organisation') }}
+    </div>
+    <div class="cover-footer-date">
+      {{ generated_at | default('') }}
     </div>
     <div class="cover-footer-brand">
       Prepared by HPS &mdash; SSPM Platform

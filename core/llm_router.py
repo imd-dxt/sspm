@@ -247,25 +247,68 @@ No markdown headers. Direct prose only."""
             result = self.call_ollama(prompt)
         return result or f"[Exploitation scenario unavailable for {control_id}]"
 
-    def generate_impact_analysis(self, finding: dict[str, Any]) -> str:
-        sanitised, token_map = self.sanitise(finding)
-        safe = {k: v for k, v in sanitised.items()
-                if k in {"severity", "category", "platform", "rule_id", "open_count"}}
-        prompt = f"""You are a risk analyst.
-Analyse the business impact of this security finding:
-{json.dumps(safe, indent=2, default=str)}
+    def _ollama_anonymize_finding(self, finding: dict[str, Any]) -> str:
+        """
+        Ask Ollama (local) to convert a raw finding into a 2-3 sentence,
+        privacy-safe context summary that contains NO emails, usernames,
+        UUIDs, or organisation-specific identifiers.
 
-Write 3 concise bullet points:
-• Data/system impact
-• Regulatory/compliance exposure
+        This summary is what DeepSeek (cloud) sees — never the raw finding.
+        """
+        prompt = f"""You are a privacy-preserving security analyst.
+Read the security finding below and write 2-3 sentences describing it
+ABSTRACTLY for a cloud LLM that must not learn any private details.
+
+STRICT RULES:
+- NEVER include emails, usernames, real names, UUIDs, repo names,
+  organisation names, tenant IDs, IPs, or any concrete identifier.
+- Replace specific resources with generic phrasing (e.g. "a production
+  repository", "an admin account").
+- Keep severity, control type, platform name (github/jira/etc) and
+  finding category — these are NOT sensitive.
+
+Finding (raw — keep this server-side only):
+{json.dumps(finding, indent=2, default=str)[:1500]}
+
+Output (the abstract description only — no preamble):"""
+        result = self.call_ollama(prompt)
+        if result:
+            return result
+        # Fallback: hand-built safe summary if Ollama is offline
+        return (
+            f"A {finding.get('severity', 'medium')}-severity finding in the "
+            f"{finding.get('category', 'security')} category on the "
+            f"{finding.get('platform', 'a SaaS')} platform "
+            f"({finding.get('open_count', 0)} open occurrence(s))."
+        )
+
+    def generate_impact_analysis(self, finding: dict[str, Any]) -> str:
+        """
+        Orchestrated pipeline:  Ollama (raw → anonymous context)
+                              → DeepSeek (anonymous context → polished narrative)
+
+        DeepSeek never sees the raw finding. Only the Ollama-produced summary
+        plus three non-sensitive labels (severity, category, platform) are sent.
+        """
+        anonymous_context = self._ollama_anonymize_finding(finding)
+        prompt = f"""You are a risk analyst writing for a board-level compliance report.
+
+Context (already anonymised — contains no private identifiers):
+{anonymous_context}
+
+Metadata: severity={finding.get('severity', 'medium')}, category={finding.get('category', 'general')}, platform={finding.get('platform', 'saas')}
+
+Write 3 concise bullet points (max 60 words total):
+• Business / operational impact
+• Regulatory / compliance exposure
 • Estimated remediation effort
-Max 60 words total."""
+
+No preamble, no headers, plain prose under each bullet."""
         result = self.call_deepseek(prompt)
         if result is None:
+            # Fall back to Ollama for the full narrative if DeepSeek is unavailable
             result = self.call_ollama(prompt)
-        if result is None:
-            return "[Impact analysis unavailable]"
-        return self.de_tokenise(result, token_map)
+        return result or "[Impact analysis unavailable]"
 
     def generate_trend_narrative(self, trend_summary: dict[str, Any]) -> str:
         prompt = f"""You are a security analyst reviewing compliance trends.

@@ -77,64 +77,92 @@
       border-bottom: 1px solid var(--border); padding-bottom: 4px; margin: 14px 0 10px;
     }
 
-    /* ── Cover page ──────────────────────────────────────────────── */
-    .cover { page: cover-page; min-height: 297mm; background: white; display: flex; flex-direction: column; page-break-after: always; }
-
-    /* Top navy band with logo */
-    .cover-top-band {
-      background: var(--navy); padding: 18px 36px;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .cover-top-band img { height: 44px; filter: brightness(0) invert(1); }
-    .cover-top-band-hps { font-size: 22pt; font-weight: 700; color: white; letter-spacing: -0.02em; }
-    .cover-top-tagline  { font-size: 8pt; color: rgba(255,255,255,0.65); text-align: right; line-height: 1.6; }
-
-    /* Thin accent stripe below top band */
-    .cover-accent-stripe { height: 5px; background: linear-gradient(to right, #2563eb, #1e3a5f); }
-
-    .cover-body { flex: 1; padding: 44px 40px 36px; display: flex; flex-direction: column; }
-
-    .cover-classification {
-      display: inline-block; background: var(--red); color: white;
-      font-size: 7.5pt; font-weight: 700; padding: 4px 14px; border-radius: 12px;
-      letter-spacing: 0.1em; text-transform: uppercase; align-self: flex-start; margin-bottom: 36px;
+    /* ── Cover page: minimal — HPS logo + title only ───────────────── */
+    .cover {
+      page: cover-page;
+      height: 297mm;          /* full A4 — forces page break to land cleanly */
+      background: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      page-break-after: always;
+      position: relative;
+      padding: 60mm 30mm 40mm;
+      box-sizing: border-box;
     }
 
-    .cover-title    { font-size: 28pt; font-weight: 700; color: var(--navy); line-height: 1.15; margin-bottom: 8px; }
-    .cover-subtitle { font-size: 13pt; color: var(--muted); margin-bottom: 28px; }
-    .cover-divider  { border: none; border-top: 2px solid var(--border); margin: 22px 0; }
-
-    .cover-score-row   { display: flex; align-items: center; gap: 28px; margin-bottom: 8px; }
-    .cover-score-ring  {
-      width: 110px; height: 110px; border-radius: 50%;
-      border: 4px solid var(--navy);
-      background: #f0f4f8;
-      display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0;
-    }
-    .cover-score-num   { font-size: 28pt; font-weight: 700; line-height: 1; }
-    .cover-score-lbl   { font-size: 7pt; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
-    .score-green { color: #16a34a; } .score-amber { color: #d97706; } .score-red { color: #dc2626; }
-
-    .cover-status-badge {
-      display: inline-block; padding: 5px 16px; border-radius: 20px;
-      font-size: 10.5pt; font-weight: 700; margin-bottom: 8px;
-    }
+    /* Status / sev badges used elsewhere — keep these classes available */
     .status-compliant     { background: #dcfce7; color: #166534; }
     .status-partial       { background: #fef3c7; color: #92400e; }
     .status-non-compliant { background: #fee2e2; color: #991b1b; }
 
-    .cover-status-desc { font-size: 9pt; color: var(--muted); line-height: 1.65; max-width: 340px; }
-
-    .cover-meta-grid  { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 36px; }
-    .cover-meta-label { font-size: 7.5pt; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; }
-    .cover-meta-value { font-size: 9.5pt; color: var(--navy); font-weight: 600; margin-top: 2px; }
-
-    .cover-footer {
-      background: #f1f5f9; border-top: 1px solid var(--border); padding: 14px 40px;
-      display: flex; align-items: center; justify-content: space-between;
+    /* Logo */
+    .cover-logo-wrap {
+      display: flex; justify-content: center;
+      margin-bottom: 50px;
     }
-    .cover-footer-disclaimer { font-size: 7.5pt; color: var(--muted); max-width: 420px; line-height: 1.5; }
-    .cover-footer-brand      { font-size: 9pt; color: var(--navy); font-weight: 700; }
+    .cover-logo-img  { height: 130px; width: auto; }
+    .cover-logo-text {
+      font-size: 56pt; font-weight: 800; color: var(--navy);
+      letter-spacing: -0.04em;
+    }
+
+    /* Decorative line between logo and title */
+    .cover-accent-line {
+      width: 80px; height: 4px;
+      background: linear-gradient(to right, #2563eb, var(--navy));
+      margin: 0 auto 40px;
+      border-radius: 2px;
+    }
+
+    /* Title */
+    .cover-title-block { text-align: center; }
+    .cover-classification {
+      display: inline-block;
+      background: var(--red); color: white;
+      font-size: 7.5pt; font-weight: 700;
+      padding: 4px 16px; border-radius: 12px;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+    .cover-title {
+      font-size: 34pt; font-weight: 700; color: var(--navy);
+      line-height: 1.15; margin-bottom: 12px;
+      letter-spacing: -0.01em;
+    }
+    .cover-subtitle {
+      font-size: 14pt; color: var(--muted);
+      font-weight: 400; letter-spacing: 0.02em;
+    }
+
+    /* Bottom footer */
+    .cover-footer {
+      position: absolute;
+      bottom: 24mm; left: 30mm; right: 30mm;
+      text-align: center;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+    }
+    .cover-footer-org   { font-size: 12pt; font-weight: 700; color: var(--navy); }
+    .cover-footer-date  { font-size: 9pt;  color: var(--muted); margin-top: 4px; }
+    .cover-footer-brand { font-size: 8pt;  color: var(--muted); margin-top: 10px; font-weight: 500; letter-spacing: 0.04em; }
+
+    /* ── Report info strip (top of page 2) ───────────────────────── */
+    .report-info-strip {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      gap: 10px 24px;
+      background: var(--light); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 16px;
+      margin-bottom: 18px;
+    }
+    .ri-label {
+      font-size: 7pt; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .ri-value {
+      font-size: 9pt; color: var(--navy); font-weight: 600; margin-top: 2px;
+    }
 
     /* ── KPI strip ───────────────────────────────────────────────── */
     .kpi-strip { display: flex; gap: 10px; margin-bottom: 18px; }

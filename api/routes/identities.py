@@ -387,40 +387,85 @@ def _user_username(entity: NormalizedEntity) -> str:
     return (entity.data_json or {}).get("username") or entity.platform_id
 
 
+def _identity_tokens(entity: NormalizedEntity) -> set[str]:
+    """Return all match tokens for a user — email, email local-part, and username.
+
+    A user is correlated across platforms if ANY of these tokens match.
+    """
+    tokens: set[str] = set()
+    if entity.email:
+        e = entity.email.lower().strip()
+        if e:
+            tokens.add(f"email:{e}")
+            local = e.split("@")[0]
+            if local:
+                tokens.add(f"local:{local}")
+    uname = _user_username(entity)
+    if uname:
+        tokens.add(f"user:{uname.lower().strip()}")
+    return tokens
+
+
 @router.get("/cross-platform-users")
 def list_cross_platform_users(
     db: DB,
     limit: Annotated[int, Query(le=200)] = 50,
 ) -> list[dict[str, Any]]:
     """
-    Users present on 2+ SaaS platforms (matched by email — same key
-    Neo4j uses for FEDERATED_IDENTITY edges).
+    Users present on 2+ SaaS platforms.
 
-    Each row carries a risk score combining:
-      • severity-weighted open findings on the user across platforms
-      • +5 if admin on any platform
-      • +3 per additional platform (attack surface bonus)
+    Matching is done by ANY of: email, email local-part, or username
+    (lowercased). Users connected through a shared token are merged via
+    union-find so transitive matches work — e.g. user X on platform A and
+    user Y on platform B share an email, user Y also shares a username
+    with user Z on platform C → all three are grouped together.
+
+    Risk score = severity-weighted open findings + admin bonus (+5)
+                 + attack-surface bonus (+3 per extra platform).
     """
     users = (
         db.query(NormalizedEntity)
-        .filter(
-            NormalizedEntity.entity_type == "user",
-            NormalizedEntity.email.isnot(None),
-        )
+        .filter(NormalizedEntity.entity_type == "user")
         .all()
     )
-    users = [u for u in users if not _account_type_app(u) and u.email]
+    users = [u for u in users if not _account_type_app(u)]
+    if not users:
+        return []
 
-    # Group by lower-cased email
-    by_email: dict[str, list[NormalizedEntity]] = defaultdict(list)
+    # ── Union-find over identity tokens ───────────────────────────────────────
+    parent: dict[int, int] = {u.id: u.id for u in users}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    token_to_users: dict[str, list[NormalizedEntity]] = defaultdict(list)
     for u in users:
-        by_email[u.email.lower().strip()].append(u)
+        for tok in _identity_tokens(u):
+            token_to_users[tok].append(u)
 
-    cross_users = {
-        email: ents
-        for email, ents in by_email.items()
+    for shared_users in token_to_users.values():
+        if len(shared_users) < 2:
+            continue
+        head = shared_users[0]
+        for other in shared_users[1:]:
+            union(head.id, other.id)
+
+    groups: dict[int, list[NormalizedEntity]] = defaultdict(list)
+    for u in users:
+        groups[find(u.id)].append(u)
+
+    cross_users = [
+        ents for ents in groups.values()
         if len({e.platform for e in ents}) >= 2
-    }
+    ]
     if not cross_users:
         return []
 
@@ -431,11 +476,13 @@ def list_cross_platform_users(
         findings_by_key[(f.platform, f.resource_identifier)].append(f)
 
     result: list[dict[str, Any]] = []
-    for email, ents in cross_users.items():
+    for ents in cross_users:
         platforms = sorted({e.platform for e in ents})
         is_admin_any = False
         display_name = None
+        primary_email = None
         usernames: list[dict[str, str]] = []
+        match_keys: set[str] = set()
         critical = high = medium = low = 0
         risk_score = 0
 
@@ -444,12 +491,21 @@ def list_cross_platform_users(
             usernames.append({"platform": e.platform, "username": uname})
             if not display_name:
                 display_name = _user_display_name(e)
+            if not primary_email and e.email:
+                primary_email = e.email.lower().strip()
             if _is_admin_entity(e):
                 is_admin_any = True
 
-            # Direct findings: those whose resource_identifier matches the
-            # user's platform_id, username, or email on the same platform.
-            for key in (e.platform_id, uname, email):
+            # Collect candidate keys used to look up findings tied to this user
+            user_keys: set[str] = {e.platform_id}
+            if uname:
+                user_keys.add(uname)
+            if e.email:
+                user_keys.add(e.email)
+                user_keys.add(e.email.lower().strip())
+            match_keys.update(user_keys)
+
+            for key in user_keys:
                 if not key:
                     continue
                 for f in findings_by_key.get((e.platform, key), []):
@@ -464,9 +520,14 @@ def list_cross_platform_users(
             risk_score += 5
         risk_score += (len(platforms) - 1) * 3   # cross-platform attack surface
 
+        # Identifier shown in the UI — email if any platform had one, else
+        # the first username we saw, else the platform_id.
+        identifier = primary_email or (usernames[0]["username"] if usernames else "unknown")
+
         result.append({
-            "email":          email,
-            "display_name":   display_name or email.split("@")[0],
+            "email":          primary_email or "",
+            "identifier":     identifier,
+            "display_name":   display_name or identifier,
             "platforms":      platforms,
             "platform_count": len(platforms),
             "usernames":      usernames,
@@ -477,9 +538,10 @@ def list_cross_platform_users(
             "medium":         medium,
             "low":            low,
             "risk_score":     risk_score,
+            "matched_on":     "email" if primary_email else "username",
         })
 
-    result.sort(key=lambda x: (-x["risk_score"], -x["open_findings"], x["email"]))
+    result.sort(key=lambda x: (-x["risk_score"], -x["open_findings"], x["identifier"]))
     return result[:limit]
 
 

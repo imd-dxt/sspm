@@ -1,10 +1,11 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, XCircle, Clock, Loader2, Activity, ChevronDown, ChevronRight } from 'lucide-react'
+import { ArrowLeft, CheckCircle, XCircle, Clock, Loader2, Activity, ChevronDown, ChevronRight, KeyRound } from 'lucide-react'
 import { useState } from 'react'
 import { useConnectors } from '../api/connectors'
 import { useScanRunsByConnector } from '../api/rules'
 import { formatAbsolute, formatRelative, PLATFORMS } from '../lib/utils'
 import PlatformLogo from '../components/shared/PlatformLogo'
+import UpdateCredentialsModal from '../components/connectors/UpdateCredentialsModal'
 import type { ScanRun } from '../api/types'
 
 function statusIcon(status: string) {
@@ -109,6 +110,7 @@ export default function ConnectorDetail() {
   const navigate = useNavigate()
   const { data: connectors } = useConnectors()
   const { data, isLoading, isError, refetch } = useScanRunsByConnector(id)
+  const [credsModalOpen, setCredsModalOpen] = useState(false)
 
   const connector = connectors?.find((c) => c.id === id)
   const platform = connector ? (PLATFORMS[connector.platform_name] ?? { label: connector.platform_name }) : null
@@ -137,7 +139,7 @@ export default function ConnectorDetail() {
           All connectors
         </button>
         {connector && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
             <PlatformLogo platform={connector.platform_name} size={24} />
             <div>
               <h2 style={{ fontSize: '1.0625rem', fontWeight: 700, color: 'var(--text)' }}>{connector.display_name}</h2>
@@ -145,7 +147,35 @@ export default function ConnectorDetail() {
             </div>
           </div>
         )}
+
+        {connector && (
+          <button
+            onClick={() => setCredsModalOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '7px 14px', borderRadius: 8,
+              fontSize: '0.8125rem', fontWeight: 500,
+              border: '1.5px solid var(--border)',
+              background: 'var(--surface)',
+              color: 'var(--text)', cursor: 'pointer',
+            }}
+            title="Replace the stored API token / secret without recreating the connector"
+          >
+            <KeyRound size={14} />
+            Rotate credentials
+          </button>
+        )}
       </div>
+
+      {connector && (
+        <UpdateCredentialsModal
+          open={credsModalOpen}
+          onClose={() => setCredsModalOpen(false)}
+          connectorId={connector.id}
+          platform={connector.platform_name}
+          displayName={connector.display_name}
+        />
+      )}
 
       {/* Stat strip */}
       {!isLoading && sorted.length > 0 && (

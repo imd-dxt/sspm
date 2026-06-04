@@ -86,6 +86,13 @@ class ConnectorScheduleRequest(BaseModel):
     )
 
 
+class ConnectorCredentialsUpdate(BaseModel):
+    credentials: dict[str, str] = Field(
+        ...,
+        description="New credentials (e.g. rotated API token). Encrypted at rest.",
+    )
+
+
 class ConnectorStatusResponse(BaseModel):
     connector_id: UUID
     platform_name: str

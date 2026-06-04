@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 
 from sqlalchemy import func
 from database.models import Connector, Finding, ScanRun
-from database.schemas import ConnectorCreate, ConnectorResponse, ConnectorStatusResponse, ConnectorScheduleRequest, ScanRunResponse
+from database.schemas import (
+    ConnectorCreate,
+    ConnectorCredentialsUpdate,
+    ConnectorResponse,
+    ConnectorScheduleRequest,
+    ConnectorStatusResponse,
+    ScanRunResponse,
+)
 from database.session import get_db
 from utils.crypto import encrypt, decrypt
 
@@ -386,6 +393,41 @@ async def _bg_post_sync(platform: str, scan_run_id: str) -> None:
                 log.warning("bg_post_sync: report failed platform=%s framework=%s: %s", target_platform, framework, exc)
 
     log.info("bg_post_sync: complete platform=%s", platform)
+
+
+# ── Credentials rotation ──────────────────────────────────────────────────────
+
+@router.patch(
+    "/{connector_id}/credentials",
+    response_model=ConnectorResponse,
+    responses={
+        404: {"description": "Connector not found"},
+        400: {"description": "Empty credentials payload"},
+    },
+)
+def update_connector_credentials(
+    connector_id: str,
+    payload: ConnectorCredentialsUpdate,
+    db: DB,
+) -> Connector:
+    """
+    Replace a connector's stored credentials (e.g. when a rotated API token
+    expires). The new credentials are encrypted at rest using the same Fernet
+    key. Connection health is reset to NULL so the next /test or /sync
+    re-evaluates it.
+    """
+    if not payload.credentials:
+        raise HTTPException(status_code=400, detail="credentials cannot be empty")
+
+    obj = _get_connector_or_404(connector_id, db)
+    obj.credentials_encrypted = encrypt(json.dumps(payload.credentials))
+    # Reset health so the operator sees a fresh test result, not the stale failure
+    obj.connection_ok = None
+    obj.last_sync_error = None
+    db.commit()
+    db.refresh(obj)
+    log.info("connector_credentials_rotated", extra={"id": obj.id, "platform": obj.platform_name})
+    return obj
 
 
 # ── Schedule ──────────────────────────────────────────────────────────────────
