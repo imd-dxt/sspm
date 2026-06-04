@@ -369,6 +369,120 @@ def list_identity_users(
     return result[offset: offset + limit]
 
 
+# ── Cross-platform users ──────────────────────────────────────────────────────
+
+_SEV_WEIGHTS = {"critical": 10, "high": 7, "medium": 4, "low": 1}
+
+
+def _account_type_app(entity: NormalizedEntity) -> bool:
+    return (entity.data_json or {}).get("metadata", {}).get("account_type") == "app"
+
+
+def _user_display_name(entity: NormalizedEntity) -> str:
+    d = entity.data_json or {}
+    return d.get("display_name") or d.get("username") or entity.platform_id
+
+
+def _user_username(entity: NormalizedEntity) -> str:
+    return (entity.data_json or {}).get("username") or entity.platform_id
+
+
+@router.get("/cross-platform-users")
+def list_cross_platform_users(
+    db: DB,
+    limit: Annotated[int, Query(le=200)] = 50,
+) -> list[dict[str, Any]]:
+    """
+    Users present on 2+ SaaS platforms (matched by email — same key
+    Neo4j uses for FEDERATED_IDENTITY edges).
+
+    Each row carries a risk score combining:
+      • severity-weighted open findings on the user across platforms
+      • +5 if admin on any platform
+      • +3 per additional platform (attack surface bonus)
+    """
+    users = (
+        db.query(NormalizedEntity)
+        .filter(
+            NormalizedEntity.entity_type == "user",
+            NormalizedEntity.email.isnot(None),
+        )
+        .all()
+    )
+    users = [u for u in users if not _account_type_app(u) and u.email]
+
+    # Group by lower-cased email
+    by_email: dict[str, list[NormalizedEntity]] = defaultdict(list)
+    for u in users:
+        by_email[u.email.lower().strip()].append(u)
+
+    cross_users = {
+        email: ents
+        for email, ents in by_email.items()
+        if len({e.platform for e in ents}) >= 2
+    }
+    if not cross_users:
+        return []
+
+    # Findings index: (platform, resource_identifier) → list[Finding]
+    findings = db.query(Finding).filter(Finding.status == "open").all()
+    findings_by_key: dict[tuple[str, str], list[Finding]] = defaultdict(list)
+    for f in findings:
+        findings_by_key[(f.platform, f.resource_identifier)].append(f)
+
+    result: list[dict[str, Any]] = []
+    for email, ents in cross_users.items():
+        platforms = sorted({e.platform for e in ents})
+        is_admin_any = False
+        display_name = None
+        usernames: list[dict[str, str]] = []
+        critical = high = medium = low = 0
+        risk_score = 0
+
+        for e in ents:
+            uname = _user_username(e)
+            usernames.append({"platform": e.platform, "username": uname})
+            if not display_name:
+                display_name = _user_display_name(e)
+            if _is_admin_entity(e):
+                is_admin_any = True
+
+            # Direct findings: those whose resource_identifier matches the
+            # user's platform_id, username, or email on the same platform.
+            for key in (e.platform_id, uname, email):
+                if not key:
+                    continue
+                for f in findings_by_key.get((e.platform, key), []):
+                    sev = (f.severity or "low").lower()
+                    risk_score += _SEV_WEIGHTS.get(sev, 1)
+                    if sev == "critical": critical += 1
+                    elif sev == "high":   high     += 1
+                    elif sev == "medium": medium   += 1
+                    elif sev == "low":    low      += 1
+
+        if is_admin_any:
+            risk_score += 5
+        risk_score += (len(platforms) - 1) * 3   # cross-platform attack surface
+
+        result.append({
+            "email":          email,
+            "display_name":   display_name or email.split("@")[0],
+            "platforms":      platforms,
+            "platform_count": len(platforms),
+            "usernames":      usernames,
+            "is_admin":       is_admin_any,
+            "open_findings":  critical + high + medium + low,
+            "critical":       critical,
+            "high":           high,
+            "medium":         medium,
+            "low":            low,
+            "risk_score":     risk_score,
+        })
+
+    result.sort(key=lambda x: (-x["risk_score"], -x["open_findings"], x["email"]))
+    return result[:limit]
+
+
 # ── Resources helpers ─────────────────────────────────────────────────────────
 
 def _is_org_entity(entity: NormalizedEntity) -> bool:

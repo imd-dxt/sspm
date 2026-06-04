@@ -91,6 +91,29 @@ export function useFindingsByResource(
   })
 }
 
+export interface CrossPlatformUser {
+  email: string
+  display_name: string
+  platforms: string[]
+  platform_count: number
+  usernames: { platform: string; username: string }[]
+  is_admin: boolean
+  open_findings: number
+  critical: number
+  high: number
+  medium: number
+  low: number
+  risk_score: number
+}
+
+export function useCrossPlatformUsers(limit = 50): UseQueryResult<CrossPlatformUser[]> {
+  return useQuery({
+    queryKey: ['identity-cross-platform-users', limit],
+    queryFn: () => get<CrossPlatformUser[]>('/identities/cross-platform-users', { limit }),
+    refetchInterval: 60_000,
+  })
+}
+
 export function useIdentityGraph(
   platform: string,
   connectorId?: string,

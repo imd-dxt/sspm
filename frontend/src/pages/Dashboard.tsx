@@ -1,15 +1,15 @@
 import { Link } from 'react-router-dom'
-import { ShieldCheck, AlertTriangle, Plug, ArrowRight, TrendingUp } from 'lucide-react'
+import { ShieldCheck, AlertTriangle, Plug, ArrowRight, Users, ShieldAlert } from 'lucide-react'
 import {
   RadialBarChart, RadialBar, PolarRadiusAxis, Label,
   AreaChart, Area, XAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell,
 } from 'recharts'
 import type { ScanRun, IdentityPlatform } from '../api/types'
-import { useFindingSummary, useCrossPlatformFindings, useFindingsByCategory } from '../api/findings'
+import { useFindingSummary, useFindingsByCategory } from '../api/findings'
 import { useConnectors } from '../api/connectors'
 import { useScanRuns } from '../api/rules'
-import { useIdentityPlatforms } from '../api/identities'
+import { useIdentityPlatforms, useCrossPlatformUsers } from '../api/identities'
 import { usePostureScore, usePrioritizedActions } from '../api/activityLogs'
 import SeverityBadge from '../components/findings/SeverityBadge'
 import PlatformLogo from '../components/shared/PlatformLogo'
@@ -422,7 +422,6 @@ function FindingsTrendCard({ scanRunsQ }: Readonly<{ scanRunsQ: ScanRunsQ }>) {
 
 type PrioritizedQ = ReturnType<typeof usePrioritizedActions>
 type ConnectorsQ  = ReturnType<typeof useConnectors>
-type CrossQ       = ReturnType<typeof useCrossPlatformFindings>
 
 const SEVERITY_GAIN: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 }
 
@@ -517,49 +516,121 @@ function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
   )
 }
 
-function CrossPlatformRisksCard({ q }: Readonly<{ q: CrossQ }>) {
-  const risks = q.data ?? []
+type CrossUsersQ = ReturnType<typeof useCrossPlatformUsers>
+
+function TopRiskyUsersCard({ q }: Readonly<{ q: CrossUsersQ }>) {
+  const users = (q.data ?? []).slice(0, 3)
   let body: React.ReactNode
+
   if (q.isLoading) {
     body = (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {[1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 36, borderRadius: 8 }} />)}
+        {[1, 2, 3].map((i) => <div key={i} className="skeleton" style={{ height: 56, borderRadius: 8 }} />)}
       </div>
     )
-  } else if (risks.length === 0) {
+  } else if (users.length === 0) {
     body = (
-      <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', padding: '8px 0', textAlign: 'center' }}>
-        No cross-platform risks detected.
+      <p style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', padding: '12px 0', textAlign: 'center' }}>
+        No users found on multiple platforms yet.
       </p>
     )
   } else {
     body = (
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {risks.slice(0, 5).map((f) => (
-            <li key={f.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px', borderRadius: 8, transition: 'background 0.12s' }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--surface-hover)')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-            >
-              <SeverityBadge severity={f.severity} />
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {users.map((u, idx) => (
+          <li key={u.email} style={{
+            padding: '10px 12px', borderRadius: 10,
+            background: 'var(--surface-2)',
+            border: '1px solid var(--border)',
+            display: 'flex', flexDirection: 'column', gap: 6,
+          }}>
+            {/* Top row: rank + name + admin */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                flexShrink: 0,
+                width: 20, height: 20, borderRadius: '50%',
+                background: 'color-mix(in oklch, var(--sev-critical) 15%, transparent)',
+                color: 'var(--sev-critical)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.6875rem', fontWeight: 700,
+              }}>{idx + 1}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {f.rule_name ?? f.rule_id}
+                <p style={{
+                  fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {u.display_name}
                 </p>
-                <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 }}>
-                  {f.resource_identifier}
+                <p style={{
+                  fontSize: '0.625rem', color: 'var(--text-muted)',
+                  fontFamily: 'monospace',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {u.email}
                 </p>
               </div>
-            </li>
-          ))}
-        </ul>
+              {u.is_admin && (
+                <span style={{
+                  fontSize: '0.5625rem', fontWeight: 700,
+                  padding: '2px 6px', borderRadius: 4,
+                  background: 'color-mix(in oklch, var(--sev-critical) 15%, transparent)',
+                  color: 'var(--sev-critical)',
+                  textTransform: 'uppercase', letterSpacing: '0.04em',
+                  flexShrink: 0,
+                }}>Admin</span>
+              )}
+            </div>
+
+            {/* Platforms + risk score */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {u.platforms.map((p) => (
+                <span key={p} style={{
+                  fontSize: '0.5625rem', fontWeight: 600,
+                  padding: '2px 6px', borderRadius: 4,
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  color: 'var(--text-muted)',
+                  textTransform: 'capitalize',
+                }}>{p}</span>
+              ))}
+              <span style={{ flex: 1 }} />
+              {u.open_findings > 0 && (
+                <span style={{
+                  fontSize: '0.625rem', color: 'var(--text-muted)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  <strong style={{ color: 'var(--sev-critical)' }}>{u.open_findings}</strong> finding{u.open_findings !== 1 ? 's' : ''}
+                </span>
+              )}
+              <span style={{
+                fontSize: '0.625rem', fontWeight: 700,
+                padding: '2px 6px', borderRadius: 4,
+                background: 'color-mix(in oklch, var(--sev-critical) 12%, transparent)',
+                color: 'var(--sev-critical)',
+                fontVariantNumeric: 'tabular-nums',
+              }}>
+                risk {u.risk_score}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
     )
   }
+
   return (
     <div className="card" style={{ padding: '20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <TrendingUp size={14} style={{ color: 'var(--accent)' }} />
-        <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)' }}>Cross-platform Risks</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <ShieldAlert size={14} style={{ color: 'var(--sev-critical)' }} />
+          <h2 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)' }}>Top Risky Identities</h2>
+        </div>
+        <Link to="/identities" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.6875rem', color: 'var(--text-muted)', textDecoration: 'none' }}>
+          <Users size={11} /> All <ArrowRight size={11} />
+        </Link>
       </div>
+      <p style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: -10, marginBottom: 10 }}>
+        Users present on 2+ platforms, ranked by risk
+      </p>
       {body}
     </div>
   )
@@ -569,7 +640,7 @@ export default function Dashboard() {
   const summaryQ = useFindingSummary()
   const connectorsQ = useConnectors()
   const prioritizedQ = usePrioritizedActions(undefined, 5)
-  const crossPlatformQ = useCrossPlatformFindings()
+  const crossUsersQ = useCrossPlatformUsers(50)
   const scanRunsQ = useScanRuns()
   const postureQ = usePostureScore()
 
@@ -589,10 +660,10 @@ export default function Dashboard() {
         <ConnectedPlatformsCard />
       </div>
 
-      {/* Main 2-col grid: actions | risks */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 300px)', gap: 20, alignItems: 'start' }}>
+      {/* Main 2-col grid: actions | top risky identities */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 320px)', gap: 20, alignItems: 'start' }}>
         <PrioritizedActionsCard q={prioritizedQ} />
-        <CrossPlatformRisksCard q={crossPlatformQ} />
+        <TopRiskyUsersCard q={crossUsersQ} />
       </div>
     </div>
   )
