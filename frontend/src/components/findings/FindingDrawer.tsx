@@ -100,7 +100,17 @@ export default function FindingDrawer({ finding, onClose }: Readonly<Props>) {
   }
 
   const statusColor = STATUS_COLORS[finding.status] ?? STATUS_COLORS.open
-  const complianceItems = finding.compliance_mapping ?? []
+  // compliance_mapping can be a list of strings ("CIS:1.1.3") OR a list of
+  // dicts ({"SOC2-TSC": "CC6.1"}). Normalize every entry to a display string.
+  const complianceItems: string[] = (finding.compliance_mapping ?? []).map((entry) => {
+    if (typeof entry === 'string') return entry
+    if (entry && typeof entry === 'object') {
+      const [k, v] = Object.entries(entry as Record<string, unknown>)[0] ?? ['', '']
+      const vStr = typeof v === 'string' || typeof v === 'number' ? String(v) : ''
+      return vStr ? `${k}:${vStr}` : String(k)
+    }
+    return String(entry)
+  })
 
   return (
     <>

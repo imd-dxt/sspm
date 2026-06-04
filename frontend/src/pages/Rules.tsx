@@ -98,12 +98,23 @@ function RuleRow({ rule }: Readonly<{ rule: Rule }>) {
             <div>
               <p className="label">Compliance</p>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {(rule.compliance_mapping ?? []).map((c) => (
-                  <span key={c} style={{
-                    borderRadius: 6, background: 'var(--surface)', border: '1px solid var(--border)',
-                    padding: '2px 8px', fontSize: '0.6875rem', fontFamily: 'monospace', color: 'var(--text-muted)',
-                  }}>{c}</span>
-                ))}
+                {(rule.compliance_mapping ?? []).map((entry) => {
+                  // entry can be a string ("CIS:1.1.3") or a dict ({"SOC2-TSC":"CC6.1"})
+                  let label: string
+                  if (typeof entry === 'string') {
+                    label = entry
+                  } else {
+                    const [k, v] = Object.entries(entry as Record<string, unknown>)[0] ?? ['', '']
+                    const vStr = typeof v === 'string' || typeof v === 'number' ? String(v) : ''
+                    label = vStr ? `${k}:${vStr}` : String(k)
+                  }
+                  return (
+                    <span key={label} style={{
+                      borderRadius: 6, background: 'var(--surface)', border: '1px solid var(--border)',
+                      padding: '2px 8px', fontSize: '0.6875rem', fontFamily: 'monospace', color: 'var(--text-muted)',
+                    }}>{label}</span>
+                  )
+                })}
               </div>
             </div>
           )}

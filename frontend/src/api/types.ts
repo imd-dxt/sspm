@@ -52,7 +52,7 @@ export interface Finding {
   last_detected: string | null
   resolved_at: string | null
   remediation: string | null
-  compliance_mapping: string[]
+  compliance_mapping: (string | Record<string, string>)[]
   // Ollama posture analysis
   impact_factor: number | null
   impact_explanation: string | null
@@ -101,7 +101,7 @@ export interface Rule {
   remediation: string
   detection_query: string
   query_type: string
-  compliance_mapping: string[]
+  compliance_mapping: (string | Record<string, string>)[]
   referentials: string[]
   is_active: boolean
   cis_control: string | null
