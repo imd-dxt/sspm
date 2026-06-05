@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { RadialBarChart, RadialBar, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { RadialBarChart, RadialBar, PolarAngleAxis, Tooltip, LabelList, ResponsiveContainer } from 'recharts'
 import { ShieldCheck, Download, RefreshCw, Loader, CheckCircle2, XCircle, HelpCircle, FileDown } from 'lucide-react'
 import {
   useComplianceReport,
@@ -212,21 +212,21 @@ function PlatformRadialCard({ platform, scores }: Readonly<{ platform: string; s
     )
   }
 
-  const chartData = scores.map((s, i) => ({
+  // Sort by score so the largest bar sits on the outer ring (visually intuitive)
+  const sorted = [...scores].sort((a, b) => b.score - a.score)
+  const chartData = sorted.map((s, i) => ({
     name: s.framework,
+    label: shortFrameworkLabel(s.framework),
     score: s.score,
+    pass: s.passed_rules,
+    fail: s.failed_rules,
     fill: RADIAL_PALETTE[i % RADIAL_PALETTE.length],
   }))
   const avg = Math.round(scores.reduce((sum, s) => sum + s.score, 0) / scores.length)
   const avgColor = avg >= 75 ? 'var(--ok)' : avg >= 50 ? 'var(--sev-medium)' : 'var(--sev-critical)'
 
-  const barSize = 12
-  const barGap = 3
-  const innerRadius = 18
-  const outerRadius = innerRadius + scores.length * (barSize + barGap)
-
   return (
-    <div className="card" style={{ padding: '18px 20px', flex: '1 1 220px', minWidth: 0 }}>
+    <div className="card" style={{ padding: '18px 20px', flex: '1 1 240px', minWidth: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
         <div>
           <h3 style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text)', textTransform: 'capitalize' }}>
@@ -239,44 +239,78 @@ function PlatformRadialCard({ platform, scores }: Readonly<{ platform: string; s
         </span>
       </div>
 
-      <ResponsiveContainer width="100%" height={outerRadius * 2 + 40}>
+      <ResponsiveContainer width="100%" height={250}>
         <RadialBarChart
           data={chartData}
-          startAngle={90}
-          endAngle={-270}
-          innerRadius={innerRadius}
-          outerRadius={outerRadius}
-          barSize={barSize}
-          barGap={barGap}
+          startAngle={-90}
+          endAngle={270}
+          innerRadius={30}
+          outerRadius={110}
           cx="50%"
           cy="50%"
         >
+          {/* Fixed 0–100 domain → bar lengths are PROPORTIONALLY accurate.
+              Without this, Recharts auto-scales to the max value, so a 70%
+              bar might fill the whole arc when no score is higher. */}
+          <PolarAngleAxis
+            type="number"
+            domain={[0, 100]}
+            tick={false}
+            angleAxisId={0}
+          />
           <RadialBar
             dataKey="score"
             background={{ fill: 'var(--surface-2)' } as Record<string, unknown>}
             cornerRadius={3}
-          />
+            label={false}
+          >
+            <LabelList
+              position="insideStart"
+              dataKey="label"
+              fill="#fff"
+              fontSize={10}
+              fontWeight={600}
+              style={{ mixBlendMode: 'luminosity' as React.CSSProperties['mixBlendMode'] }}
+            />
+          </RadialBar>
           <Tooltip
+            cursor={false}
             content={({ active, payload }) => {
               if (!active || !payload?.length) return null
-              const item = payload[0]
+              const d = payload[0].payload as {
+                name: string; score: number; pass: number; fail: number
+              }
               return (
-                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', fontSize: '0.75rem' }}>
-                  <strong style={{ color: 'var(--text)' }}>{(item.payload as { name: string }).name}</strong>
-                  <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{item.value}%</span>
+                <div style={{
+                  background: 'var(--surface)', border: '1px solid var(--border)',
+                  borderRadius: 8, padding: '8px 12px', fontSize: '0.75rem',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 2 }}>{d.name}</div>
+                  <div style={{ color: 'var(--text-muted)' }}>
+                    Score: <strong style={{ color: 'var(--text)' }}>{d.score}%</strong>
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.6875rem', marginTop: 2 }}>
+                    {d.pass} passing · {d.fail} failing
+                  </div>
                 </div>
               )
             }}
-          />
-          <Legend
-            iconType="circle"
-            iconSize={7}
-            wrapperStyle={{ fontSize: '0.625rem', paddingTop: 4, lineHeight: '1.7' }}
           />
         </RadialBarChart>
       </ResponsiveContainer>
     </div>
   )
+}
+
+/** Compact label for inside-bar display. Full names are shown in the tooltip. */
+function shortFrameworkLabel(name: string): string {
+  const n = name.toLowerCase()
+  if (n.includes('cis'))      return 'CIS'
+  if (n.includes('soc'))      return 'SOC 2'
+  if (n.includes('iso'))      return 'ISO 27001'
+  if (n.includes('nist'))     return 'NIST CSF'
+  return name.length > 10 ? name.slice(0, 10) + '…' : name
 }
 
 function groupByPlatform(scores: PlatformScore[]): Map<string, PlatformScore[]> {

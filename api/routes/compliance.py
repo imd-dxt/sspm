@@ -311,22 +311,24 @@ def get_all_scores(db: DB) -> list[PlatformScore]:
         raise HTTPException(status_code=500, detail=f"DB error: {exc}") from exc
 
     engine = ComplianceEngine()
-    return [
-        PlatformScore(**engine.calculate_score(p, f, db))
-        for p in platforms
-        for f in FRAMEWORKS
-        if engine.calculate_score(p, f, db)["total_rules"] > 0
-    ]
+    results: list[PlatformScore] = []
+    for p in platforms:
+        for f in FRAMEWORKS:
+            score = engine.calculate_score(p, f, db)
+            if score["total_rules"] > 0:
+                results.append(PlatformScore(**score))
+    return results
 
 
 @router.get("/scores/{platform}", response_model=list[PlatformScore])
 def get_scores_by_platform(platform: str, db: DB) -> list[PlatformScore]:
     engine = ComplianceEngine()
-    return [
-        PlatformScore(**engine.calculate_score(platform, f, db))
-        for f in FRAMEWORKS
-        if engine.calculate_score(platform, f, db)["total_rules"] > 0
-    ]
+    results: list[PlatformScore] = []
+    for f in FRAMEWORKS:
+        score = engine.calculate_score(platform, f, db)
+        if score["total_rules"] > 0:
+            results.append(PlatformScore(**score))
+    return results
 
 
 @router.get("/trends", response_model=list[TrendPoint])
