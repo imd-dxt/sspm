@@ -1,0 +1,545 @@
+# ============================================================
+#  SSPM — Microsoft Entra ID STIG Detection Rules
+#  Source  : CIS Microsoft Entra ID STIG Benchmark v1.0.0
+#  DISA    : Microsoft Entra ID STIG v1 R1 — 28 Feb 2025
+#  Platform: HPS SSPM — rules/ms_entra/stig_rules.yml
+# ============================================================
+
+metadata:
+  source: "CIS Microsoft Entra ID STIG Benchmark"
+  version: "1.0.0"
+  date: "2025-08-13"
+  disa_stig_version: "v1r1"
+  disa_stig_date: "2025-02-28"
+  saas: ms_entra
+  total_rules: 10
+
+rules:
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 1 — Session idle timeout
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000030
+    title: "Entra ID must initiate a session lock after 15 minutes of inactivity"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: api
+    referential:
+      disa_stig:
+        rule_id: SV-270200r1085610
+        group_id: V-270200
+        srg: SRG-APP-000295
+      iso27001: ["A.9.4.2"]
+      nist_csf: ["PR.AC-7"]
+    description: >
+      Entra ID must be configured to lock the session automatically after a period
+      of inactivity not exceeding 15 minutes. Session locks reduce the risk of
+      unauthorized access when a user leaves their workstation unattended.
+    api_check:
+      endpoint: "GET /organization"
+      graph_scope: "Organization.Read.All"
+      field_path: "value[0].settings"
+      condition:
+        idle_timeout_enabled: true
+        idle_timeout_seconds_max: 900
+      finding_message: >
+        The Entra ID directory-level idle timeout is not configured or exceeds
+        15 minutes (900 seconds). This is a CAT II STIG finding.
+    remediation:
+      summary: "Enable the directory idle timeout and set it to 15 minutes"
+      steps:
+        - "Sign in to entra.microsoft.com as Global Administrator."
+        - "Navigate to Gear icon > Settings > Signing out + notifications."
+        - "Enable 'Enable directory level idle timeout'."
+        - "Set Hours to 0 and Minutes to 15."
+        - "Click Apply."
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 2 — Inactive accounts > 35 days
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000090
+    title: "Entra ID must disable accounts after 35 days of inactivity"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: graph
+    referential:
+      disa_stig:
+        rule_id: SV-270204r1085660
+        group_id: V-270204
+        srg: ["SRG-APP-000025", "SRG-APP-000163"]
+      iso27001: ["A.9.2.5", "A.9.2.6"]
+      nist_csf: ["PR.AC-1"]
+    description: >
+      Entra ID must detect and disable user accounts that have not had any sign-in
+      activity for 35 or more days. Inactive accounts with valid credentials represent
+      a persistent attack vector that the legitimate owner will not detect.
+    prerequisites:
+      license: "Microsoft Entra ID Premium P1"
+      graph_scopes: ["AuditLog.Read.All", "User.Read.All"]
+    api_check:
+      endpoint: >
+        GET /users?$select=id,displayName,userPrincipalName,userType,
+        createdDateTime,signInActivity,accountEnabled
+        &$filter=accountEnabled eq true
+      graph_scope: "AuditLog.Read.All User.Read.All"
+      condition:
+        inactive_threshold_days: 35
+        exempt_tags: ["emergency_account", "service_account"]
+    cypher: |
+      MATCH (u:User {source_saas: "ms_entra", account_enabled: true})
+      WHERE (
+        (u.last_sign_in IS NULL AND u.created_at < datetime() - duration("P35D"))
+        OR
+        (u.last_sign_in IS NOT NULL AND u.last_sign_in < datetime() - duration("P35D"))
+      )
+      AND NOT u.is_emergency_account = true
+      AND NOT u.is_service_account = true
+      RETURN
+        u.email         AS email,
+        u.display_name  AS display_name,
+        u.created_at    AS created_at,
+        u.last_sign_in  AS last_sign_in
+    finding_message: >
+      User '{display_name}' ({email}) has been inactive for more than 35 days
+      (last sign-in: {last_sign_in}). Account is still enabled. CAT II finding.
+    remediation:
+      summary: "Disable all Entra ID accounts inactive for more than 35 days"
+      steps:
+        - "Connect-MgGraph -Scopes 'User.ReadWrite.All','SignInActivity.Read.All'"
+        - "$threshold = (Get-Date).AddDays(-35)"
+        - "$users = Get-MgUser -All -Property 'Id,DisplayName,SignInActivity'"
+        - "$inactive = $users | Where-Object { $_.SignInActivity.LastSignInDateTime -lt $threshold }"
+        - "foreach ($u in $inactive) { Set-MgUser -UserId $u.Id -AccountEnabled $false }"
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 3 — Account lockout policy
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000140
+    title: "Entra ID must lock accounts after 3 invalid attempts within 15 minutes"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: api
+    referential:
+      disa_stig:
+        rule_id: SV-270208r1085616
+        group_id: V-270208
+        srg: SRG-APP-000345
+      iso27001: ["A.9.4.2"]
+      nist_csf: ["PR.AC-7"]
+    description: >
+      Entra ID must be configured to lock a user account after no more than 3
+      consecutive invalid login attempts within a 15-minute window. Lockout duration
+      must be at least 900 seconds. This mitigates brute-force and spray attacks.
+    api_check:
+      endpoint: "GET /policies/authenticationMethodsPolicy"
+      graph_scope: "Policy.Read.All"
+      field_path: "authenticationMethodConfigurations"
+      condition:
+        lockout_threshold_max: 3
+        lockout_duration_seconds_min: 900
+      finding_message: >
+        Smart lockout is misconfigured. Threshold must be <= 3 attempts and duration
+        >= 900 seconds. Current: threshold={lockout_threshold}, duration={lockout_duration}s.
+    collected_fields:
+      - name: lockout_threshold
+        json_path: "$.authenticationMethodConfigurations[?(@.id=='Password')].additionalProperties.lockoutThreshold"
+      - name: lockout_duration_seconds
+        json_path: "$.authenticationMethodConfigurations[?(@.id=='Password')].additionalProperties.lockoutDurationInSeconds"
+    remediation:
+      summary: "Set lockout threshold to 3 and lockout duration to 900 seconds"
+      steps:
+        - "Navigate to Identity > Protection > Authentication methods > Password protection."
+        - "Set Lockout threshold to 3."
+        - "Set Lockout duration (seconds) to 900."
+        - "Save."
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 4 — Login notice / consent banner
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000150
+    title: "Entra ID must display an organizational notice and consent banner before granting access"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: api
+    referential:
+      disa_stig:
+        rule_id: SV-270209r1085618
+        group_id: V-270209
+        srg: ["SRG-APP-000068", "SRG-APP-000069", "SRG-APP-000070"]
+      iso27001: ["A.6.2.2", "A.18.1.4"]
+      nist_csf: ["PR.AT-1"]
+    description: >
+      Entra ID must display a mandatory organizational notice on the login page
+      before granting any access. The banner must inform users the system is for
+      authorized use only and that activity may be monitored.
+    api_check:
+      endpoint: "GET /organization/{organizationId}/branding/localizations/0"
+      graph_scope: "OrganizationBranding.Read.All"
+      field_path: "signInPageText"
+      condition:
+        field_must_be_non_empty: true
+        min_length: 50
+      finding_message: >
+        The signInPageText in Company Branding is absent or empty. Users see no
+        consent banner before authentication. This is a CAT II finding.
+    collected_fields:
+      - name: sign_in_page_text
+        json_path: "$.signInPageText"
+    remediation:
+      summary: "Configure the sign-in page banner in Company Branding"
+      steps:
+        - "Sign in to entra.microsoft.com as Global Administrator."
+        - "Search for 'Company Branding' > Customize > Sign-in form tab."
+        - >
+          Populate 'Sign-in page text' with the HPS mandatory notice (max 1024 chars).
+          Example: 'Vous accédez à un système d'information de HPS réservé aux
+          utilisateurs autorisés. Toute activité peut être surveillée et enregistrée.
+          L'utilisation non autorisée est strictement interdite.'
+        - "Complete all fields and click Review + Create."
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 5 — Log export to SIEM / Log Analytics
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000370
+    title: "Entra ID must export logs to a SIEM or Log Analytics workspace"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: api
+    referential:
+      disa_stig:
+        rule_id: SV-270227r1085728
+        group_id: V-270227
+        srg: SRG-APP-000358
+      iso27001: ["A.12.4.1", "A.12.4.2", "A.12.4.3"]
+      nist_csf: ["DE.AE-3", "DE.CM-7"]
+    description: >
+      Entra ID diagnostic settings must forward all security-relevant log categories
+      to a Log Analytics workspace or equivalent SIEM. This ensures audit records
+      are retained beyond the 30-day Entra ID limit and available for incident response.
+    required_log_categories:
+      - SignInLogs
+      - AuditLogs
+      - ServicePrincipalSignInLogs
+      - ManagedIdentitySignInLogs
+      - UserRiskEvents
+      - RiskyUsers
+      - RiskyServicePrincipals
+      - ServicePrincipalRiskEvents
+    api_check:
+      endpoint: >
+        GET https://management.azure.com/subscriptions/{subscriptionId}/
+        resourceGroups/{resourceGroupName}/providers/
+        microsoft.aadiam/diagnosticSettings?api-version=2017-04-01-preview
+      auth_type: azure_management_api
+      condition:
+        required_destinations: ["log_analytics_workspace", "storage_account", "event_hub"]
+        all_required_categories_enabled: true
+      finding_message: >
+        Entra ID diagnostic settings are missing or required log categories are disabled.
+        Logs are not exported to a SIEM. Missing: {missing_categories}. CAT II finding.
+    collected_fields:
+      - name: diagnostic_settings_configured
+        type: boolean
+      - name: enabled_log_categories
+        type: list
+      - name: missing_log_categories
+        type: list
+    remediation:
+      summary: "Create diagnostic settings to export all required Entra ID logs"
+      steps:
+        - "Navigate to Identity > Monitoring & health > Diagnostic settings."
+        - "Click '+ Add diagnostic settings'."
+        - "Enable: SignInLogs, AuditLogs, ServicePrincipalSignInLogs, ManagedIdentitySignInLogs, UserRiskEvents, RiskyUsers, RiskyServicePrincipals, ServicePrincipalRiskEvents."
+        - "Select 'Send to Log Analytics workspace' and choose the workspace."
+        - "Save and verify logs arrive within 1 hour."
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 6 — MFA for all users  *** CAT I — CRITICAL ***
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000440
+    title: "Entra ID must enforce MFA for all users via Conditional Access"
+    saas: ms_entra
+    severity: critical
+    cat: CAT I
+    query_type: graph
+    referential:
+      disa_stig:
+        rule_id: SV-270233r1085634
+        group_id: V-270233
+        srg: ["SRG-APP-000149", "SRG-APP-000150", "SRG-APP-000154", "SRG-APP-000155"]
+      iso27001: ["A.9.4.2", "A.9.4.3"]
+      nist_csf: ["PR.AC-7"]
+      cis_benchmark: ["1.1.1", "1.1.2"]
+    description: >
+      A Conditional Access policy must be active requiring MFA for all users on all
+      cloud apps. Policy state must be 'enabled'. Any exclusions must be documented
+      and limited to emergency break-glass accounts. This is the highest severity
+      (CAT I) finding in this benchmark — MFA blocks 99.9% of account compromises.
+    api_check:
+      endpoint: "GET /identity/conditionalAccess/policies"
+      graph_scope: "Policy.Read.All"
+      field_path: "value[]"
+      condition:
+        required_ca_policy:
+          state: "enabled"
+          include_all_users: true
+          include_all_apps: true
+          grant_mfa: true
+        per_user_mfa_check: true
+    cypher: |
+      // Finding A — users with per-user MFA disabled (legacy check)
+      MATCH (u:User {source_saas: "ms_entra", account_enabled: true})
+      WHERE u.per_user_mfa_state IN ["disabled", "NotSet", null]
+        AND NOT u.is_service_account = true
+        AND NOT u.is_emergency_account = true
+      RETURN
+        u.email            AS email,
+        u.display_name     AS display_name,
+        u.user_principal_name AS upn,
+        "Per-user MFA disabled or not configured" AS reason,
+        "critical" AS severity
+      UNION
+      // Finding B — no enabled CA policy enforcing MFA for all users
+      MATCH (p:ConditionalAccessPolicy {source_saas: "ms_entra", state: "enabled"})
+      WHERE "All" IN p.include_users
+        AND "mfa" IN p.grant_controls
+      WITH count(p) AS mfa_policies
+      WHERE mfa_policies = 0
+      RETURN
+        "N/A" AS email,
+        "TENANT" AS display_name,
+        "N/A" AS upn,
+        "No active CA policy enforces MFA for all users" AS reason,
+        "critical" AS severity
+    finding_message: >
+      CRITICAL (CAT I): MFA is not enforced for '{display_name}' ({email}).
+      Reason: {reason}. A single compromised password grants full access to all
+      Microsoft 365 and Entra ID-integrated apps.
+    remediation:
+      summary: "Create and enable a Conditional Access policy requiring MFA for all users"
+      steps:
+        - "Navigate to Conditional Access > Create new policy."
+        - "Name: 'CORP-CA-001 Require MFA All Users'."
+        - "Users > Include: All users. Exclude: emergency/break-glass accounts only."
+        - "Target resources > Cloud apps > Include: All cloud apps."
+        - "Access controls > Grant: Require multi-factor authentication."
+        - "Set policy to Report-only first, validate impact, then switch to On."
+        - "Document all exclusions with the authorizing official."
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 7 — Password maximum lifetime <= 60 days
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000610
+    title: "Entra ID must enforce a maximum password lifetime of 60 days"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: api
+    referential:
+      disa_stig:
+        rule_id: SV-270239r1085663
+        group_id: V-270239
+        srg: null
+      iso27001: ["A.9.4.3"]
+      nist_csf: ["PR.AC-1"]
+    description: >
+      The Entra ID tenant must be configured with a maximum password validity period
+      of 60 days or fewer. The Entra ID default is 90 days. Periodic rotation limits
+      the window during which a stolen credential remains exploitable.
+    api_check:
+      endpoint: "GET /domains"
+      graph_scope: "Domain.Read.All"
+      field_path: "value[]"
+      condition:
+        max_password_validity_days: 60
+        null_means_default_90_days: true
+      finding_message: >
+        Domain '{domain_name}' has a password validity of {validity_days} days
+        (null = Entra default of 90 days). Maximum allowed is 60 days. CAT II finding.
+    collected_fields:
+      - name: domain_id
+        json_path: "$.value[].id"
+      - name: password_validity_period_days
+        json_path: "$.value[].passwordValidityPeriodInDays"
+      - name: is_default_domain
+        json_path: "$.value[].isDefault"
+    remediation:
+      summary: "Set password expiration to 60 days using Graph PowerShell"
+      steps:
+        - "Connect-MgGraph -Scopes 'Domain.ReadWrite.All'"
+        - "Get-MgDomain | Select-Object Id, PasswordValidityPeriodInDays"
+        - "Update-MgDomain -DomainId '<domain>' -PasswordValidityPeriodInDays 60"
+        - "Verify: Get-MgDomain | Select-Object Id, PasswordValidityPeriodInDays"
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 8 — PIM privilege activation notifications
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-000835
+    title: "Entra ID PIM must notify administrators when privileges are activated"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: api
+    referential:
+      disa_stig:
+        rule_id: SV-270255r1085626
+        group_id: V-270255
+        srg: SRG-APP-000319
+      iso27001: ["A.9.2.4", "A.12.4.1"]
+      nist_csf: ["DE.CM-3"]
+    prerequisites:
+      license: "Microsoft Entra ID P2"
+    description: >
+      When users activate privileged roles through PIM, email notifications must be
+      sent to designated system administrators (SA) and ISSO. This ensures privileged
+      activations are immediately visible and can be reviewed for legitimacy.
+    api_check:
+      endpoint: "GET /policies/roleManagementPolicies?$filter=scopeId eq '/' and scopeType eq 'DirectoryRole'"
+      graph_scope: "RoleManagementPolicy.Read.Directory"
+      field_path: "value[]"
+      condition:
+        required_notification_type: "RoleActivationAlert"
+        additional_recipients_required: true
+        min_additional_recipients: 1
+      finding_message: >
+        PIM role '{role_name}' has no email notification for activation events.
+        Admins (SA/ISSO) will not be alerted on privilege escalation. CAT II finding.
+    collected_fields:
+      - name: role_name
+        json_path: "$.value[].displayName"
+      - name: activation_alert_recipients
+        json_path: "$.value[].rules[?(@.notificationType=='RoleActivationAlert')].additionalRecipients"
+    remediation:
+      summary: "Configure PIM role activation notifications for SA and ISSO"
+      steps:
+        - "Navigate to Privileged Identity Management > Manage > Microsoft Entra roles."
+        - "Select each privileged role > Role settings > Edit."
+        - "Navigate to Notification tab."
+        - "Under 'Role activation alert', add SA and ISSO emails to Additional recipients."
+        - "Click Update. Repeat for all active/eligible roles."
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 9 — PIM: no permanent active privileged assignments
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-001900
+    title: "Entra ID must use PIM with Just-In-Time access — no permanent privileged assignments"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: graph
+    referential:
+      disa_stig:
+        rule_id: SV-270335r1085641
+        group_id: V-270335
+        srg: SRG-APP-000023
+      iso27001: ["A.9.2.3", "A.9.2.5"]
+      nist_csf: ["PR.AC-4", "PR.AC-6"]
+      cis_benchmark: ["1.1.19"]
+    prerequisites:
+      license: "Microsoft Entra ID P2"
+    description: >
+      All privileged role assignments must use Eligible type with Just-In-Time
+      activation. No active assignment should have a permanent (null) end date.
+      Permanent assignments bypass PIM JIT controls and maximize the blast radius
+      of a compromised privileged account.
+    api_check:
+      endpoint: "GET /roleManagement/directory/roleAssignmentScheduleInstances"
+      graph_scope: "RoleManagement.Read.Directory"
+      field_path: "value[]"
+      condition:
+        permanent_assignment_allowed: false
+        emergency_accounts_exempt: true
+    cypher: |
+      MATCH (u:User {source_saas: "ms_entra"})
+      -[:HAS_PERMISSION {assignment_type: "active"}]->(r:Role {source_saas: "ms_entra"})
+      WHERE r.is_privileged = true
+        AND r.end_date_time IS NULL
+        AND NOT u.is_emergency_account = true
+      RETURN
+        u.email        AS email,
+        u.display_name AS display_name,
+        r.display_name AS role_name,
+        r.role_id      AS role_id,
+        "Permanent active privileged assignment — must use PIM Eligible + JIT" AS reason
+    finding_message: >
+      User '{display_name}' ({email}) has a PERMANENT active assignment to privileged
+      role '{role_name}'. This bypasses PIM Just-In-Time controls. CAT II finding.
+    remediation:
+      summary: "Convert permanent active privileged assignments to Eligible JIT via PIM"
+      steps:
+        - "Navigate to Privileged Identity Management > Manage > Assignments."
+        - "Select 'Active assignments' tab."
+        - "Identify all assignments with end time 'Permanent'."
+        - "For each (excluding emergency accounts): remove active, create Eligible assignment."
+        - "Set max activation duration (e.g., 8h), require MFA and justification on activation."
+        - "Verify no roles remain with Permanent end time."
+
+  # ──────────────────────────────────────────────────────────
+  # RULE 10 — Custom banned password list
+  # ──────────────────────────────────────────────────────────
+  - id: ENTR-ID-003350
+    title: "Entra ID must enforce a custom banned password list"
+    saas: ms_entra
+    severity: high
+    cat: CAT II
+    query_type: api
+    referential:
+      disa_stig:
+        rule_id: SV-270475r1085680
+        group_id: V-270475
+        srg: null
+      iso27001: ["A.9.4.3"]
+      nist_csf: ["PR.AC-1"]
+      nist_sp800: ["SP 800-63B Section 5.1.1"]
+    description: >
+      The Entra ID tenant must have a custom banned password list enabled and populated.
+      It must block organization-specific terms (company name, product names, locations)
+      and common weak patterns. Works alongside the Microsoft global banned list.
+    api_check:
+      endpoint: "GET https://main.iam.ad.ext.azure.com/api/Policies/PasswordProtection"
+      auth_type: azure_ad_internal_api
+      condition:
+        custom_list_enforced: true
+        custom_list_non_empty: true
+        min_list_entries: 1
+      finding_message: >
+        The custom banned password list is not enforced or is empty. Users can set
+        passwords containing predictable organization-specific terms. CAT II finding.
+    collected_fields:
+      - name: custom_banned_password_enforced
+        type: boolean
+      - name: banned_password_list_count
+        type: integer
+    recommended_banned_terms:
+      # HPS-specific baseline — adapt and expand as needed
+      - hps
+      - highperformance
+      - payment
+      - morocco
+      - maroc
+      - casablanca
+      - switch
+      - terminal
+      - Welcome
+      - Password
+      - Passw0rd
+      - Admin
+      - Azerty
+      - Qwerty
+    remediation:
+      summary: "Enable and populate the Entra ID custom banned password list"
+      steps:
+        - "Navigate to portal.azure.com > Azure AD > Security > Authentication methods > Password protection."
+        - "Set 'Enforce custom list' to Yes."
+        - "Add banned terms (one per line, max 1000 words, case-insensitive)."
+        - "Include at minimum: company name, product names, location terms, and common weak passwords."
+        - "Save."
+      notes:
+        - "Case-insensitive: 'HPS' covers hps, Hps, HPS automatically."
+        - "Substitutions covered: o=0, a=@, i=1, e=3, s=$ automatically."
+        - "Complements the Microsoft global banned password list."

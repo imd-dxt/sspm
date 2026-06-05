@@ -234,8 +234,11 @@ def _build_control_report(db: Session) -> OverallReport:
         if std_id == "CIS":
             std_controls = _cis_controls_from_rules(active_rules)
         else:
-            prefix = FRAMEWORKS[std_id]["prefix"]
-            std_controls = {c: r for c, r in mapping_controls.items() if c.startswith(prefix)}
+            prefixes = FRAMEWORKS[std_id]["prefixes"]
+            std_controls = {
+                c: r for c, r in mapping_controls.items()
+                if any(c.startswith(p) for p in prefixes)
+            }
 
         if not std_controls:
             standards_out.append(ComplianceStandard(
@@ -369,8 +372,14 @@ def _collect_failing_rules(platforms: list[str], framework: str, db: Session) ->
             if framework == "CIS":
                 fw_rules = [r for r in all_rules if r.id.startswith("CIS-")]
             else:
-                prefix = FRAMEWORKS.get(framework, {}).get("prefix", "")
-                fw_rules = [r for r in all_rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
+                prefixes = FRAMEWORKS.get(framework, {}).get("prefixes", ())
+                fw_rules = [
+                    r for r in all_rules
+                    if any(
+                        any(m.startswith(p) for p in prefixes)
+                        for m in _parse_mappings(r.compliance_mapping)
+                    )
+                ]
             for rule in fw_rules:
                 open_count = db.query(Finding).filter(
                     Finding.rule_id == rule.id, Finding.platform == plat, Finding.status == "open"

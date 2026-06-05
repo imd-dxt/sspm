@@ -1049,9 +1049,91 @@ CORRECTED_QUERIES.update(SALESFORCE_CORRECTED_QUERIES)
 CORRECTED_QUERIES.update(ENTRAID_CORRECTED_QUERIES)
 
 
-def _infer_referential(platform: str) -> list[str]:
-    """Map a platform tag to its default compliance standard(s)."""
-    return ["CIS"]  # All Cypher-based rules are CIS-benchmarked
+def _infer_referential(_platform: str, rule_id: str = "") -> list[str]:
+    """Default referentials for a rule when none are listed in the YAML."""
+    rid = (rule_id or "").upper()
+    if rid.startswith("SOC2-"):
+        return ["SOC2"]
+    if rid.startswith(("ISO27001-", "ISO-")):
+        return ["ISO27001"]
+    if rid.startswith("NIST-") or "NIST" in rid:
+        return ["NIST-CSF"]
+    return ["CIS"]
+
+
+# Aliases tolerated in incoming YAML so files written against slightly
+# different schemas (DISA STIG, NIST-style) still load.
+_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
+    "name":     ("name", "title"),
+    "platform": ("platform", "saas"),
+    "category": ("category", "cat"),
+}
+
+# Normalise platform aliases used by external rule packs.
+_PLATFORM_ALIASES: dict[str, str] = {
+    "ms_entra":     "entraid",
+    "msentra":      "entraid",
+    "entra":        "entraid",
+    "azure_ad":     "entraid",
+    "azuread":      "entraid",
+    "azure-ad":     "entraid",
+    "gh":           "github",
+    "sfdc":         "salesforce",
+}
+
+
+def _pick(raw: dict[str, Any], canonical: str, fallback: Any = None) -> Any:
+    """Return the first non-None value among the aliases for `canonical`."""
+    for key in _FIELD_ALIASES.get(canonical, (canonical,)):
+        if key in raw and raw[key] is not None:
+            return raw[key]
+    return fallback
+
+
+def _normalise_platform(value: str | None) -> str | None:
+    if not value:
+        return value
+    v = str(value).strip().lower()
+    return _PLATFORM_ALIASES.get(v, v)
+
+
+def _extract_referential_mappings(raw: dict[str, Any]) -> list[dict[str, str]]:
+    """
+    Convert a DISA-STIG-style `referential:` block into our compliance_mapping
+    list of single-key dicts (e.g. {"NIST-CSF": "PR.AC-7"}).
+
+    Input shape (example):
+        referential:
+          iso27001: ["A.9.4.2"]
+          nist_csf: ["PR.AC-7"]
+          disa_stig: {rule_id: "...", srg: "..."}
+
+    Output: [{"ISO27001": "A.9.4.2"}, {"NIST-CSF": "PR.AC-7"}]
+    """
+    block = raw.get("referential")
+    if not isinstance(block, dict):
+        return []
+    out: list[dict[str, str]] = []
+    key_map = {
+        "iso27001":   "ISO27001",
+        "iso_27001":  "ISO27001",
+        "nist_csf":   "NIST-CSF",
+        "nist-csf":   "NIST-CSF",
+        "nist_800_53": "NIST-800-53",
+        "nist_800_63": "NIST-800-63",
+        "soc2":       "SOC2",
+        "soc_2":      "SOC2",
+    }
+    for k, v in block.items():
+        canonical_key = key_map.get(str(k).lower())
+        if not canonical_key:
+            continue
+        if isinstance(v, list):
+            for item in v:
+                out.append({canonical_key: str(item)})
+        elif isinstance(v, str):
+            out.append({canonical_key: v})
+    return out
 
 
 class RulesLoader:
@@ -1073,13 +1155,26 @@ class RulesLoader:
         with open(path, encoding="utf-8") as fh:
             doc = yaml.safe_load(fh)
 
-        rules_data: list[dict[str, Any]] = doc.get("rules", [])
-        # Platform precedence: doc-level "platform" > doc-level "category" >
-        # first rule's "platform" field > fallback "github"
+        # Many third-party rule packs ship as abstract framework specs with no
+        # top-level `rules:` array (e.g. `rule_pack:` files). Skip them
+        # gracefully — they aren't loadable as detection rules.
+        if not isinstance(doc, dict) or "rules" not in doc:
+            log.warning("rules_file_skipped_no_rules_key", extra={"file": yaml_path})
+            return {"inserted": 0, "updated": 0, "errors": 0, "error_details": [], "skipped": True}
+
+        rules_data: list[dict[str, Any]] = doc.get("rules") or []
+        if not rules_data:
+            log.warning("rules_file_empty", extra={"file": yaml_path})
+            return {"inserted": 0, "updated": 0, "errors": 0, "error_details": [], "skipped": True}
+
+        # Platform precedence: doc-level "platform"/"saas"/"category" >
+        # first rule's "platform"/"saas" > fallback "github"
+        first_rule_platform = _pick(rules_data[0], "platform") if rules_data else None
         platform: str = (
             doc.get("platform")
+            or doc.get("saas")
             or doc.get("category")
-            or (rules_data[0].get("platform") if rules_data else None)
+            or first_rule_platform
             or "github"
         )
 
@@ -1088,34 +1183,54 @@ class RulesLoader:
 
         for raw in rules_data:
             try:
-                rule_id = raw["id"]
+                rule_id = raw.get("id")
+                if not rule_id:
+                    raise ValueError("missing 'id' field")
+
+                name = _pick(raw, "name")
+                if not name:
+                    raise ValueError("missing 'name' (or 'title') field")
+
+                severity = raw.get("severity")
+                if not severity:
+                    raise ValueError("missing 'severity' field")
+
+                category = _pick(raw, "category", "general")
+                rule_platform = _normalise_platform(_pick(raw, "platform", platform)) or platform
+
+                # Build compliance_mapping from STIG-style referential block
+                # when the rule doesn't already carry one.
+                compliance_mapping = raw.get("compliance_mapping")
+                if not compliance_mapping:
+                    compliance_mapping = _extract_referential_mappings(raw)
+
                 corrected_query = CORRECTED_QUERIES.get(rule_id, raw.get("detection_query", ""))
                 resource_id_field = RESOURCE_ID_FIELDS.get(rule_id, "repository")
 
                 existing = self._db.get(Rule, rule_id)
                 if existing:
-                    existing.name = raw["name"]
-                    existing.platform = raw.get("platform", platform)
+                    existing.name = name
+                    existing.platform = rule_platform
                     existing.cis_control = raw.get("cis_control")
-                    existing.severity = raw["severity"]
-                    existing.category = raw["category"]
+                    existing.severity = severity
+                    existing.category = category
                     existing.profile = raw.get("profile")
                     existing.description = raw.get("description", "")
                     existing.rationale = raw.get("rationale", "")
                     existing.detection_query = corrected_query
                     existing.resource_id_field = resource_id_field
                     existing.remediation = raw.get("remediation", "")
-                    existing.compliance_mapping = raw.get("compliance_mapping", [])
-                    existing.referentials = raw.get("referentials", _infer_referential(raw.get("platform", platform)))
+                    existing.compliance_mapping = compliance_mapping or []
+                    existing.referentials = raw.get("referentials", _infer_referential(rule_platform, rule_id))
                     updated += 1
                 else:
                     rule = Rule(
                         id=rule_id,
-                        name=raw["name"],
-                        platform=raw.get("platform", platform),
+                        name=name,
+                        platform=rule_platform,
                         cis_control=raw.get("cis_control"),
-                        severity=raw["severity"],
-                        category=raw["category"],
+                        severity=severity,
+                        category=category,
                         profile=raw.get("profile"),
                         description=raw.get("description", ""),
                         rationale=raw.get("rationale", ""),
@@ -1123,8 +1238,8 @@ class RulesLoader:
                         query_type="cypher",
                         resource_id_field=resource_id_field,
                         remediation=raw.get("remediation", ""),
-                        compliance_mapping=raw.get("compliance_mapping", []),
-                        referentials=raw.get("referentials", _infer_referential(raw.get("platform", platform))),
+                        compliance_mapping=compliance_mapping or [],
+                        referentials=raw.get("referentials", _infer_referential(rule_platform, rule_id)),
                         is_active=True,
                     )
                     self._db.add(rule)

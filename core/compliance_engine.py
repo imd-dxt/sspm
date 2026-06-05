@@ -24,11 +24,15 @@ from database.models import ComplianceSnapshot, Finding, Rule
 
 log = logging.getLogger(__name__)
 
-FRAMEWORKS: dict[str, dict[str, str]] = {
-    "CIS": {"name": "CIS Benchmark", "prefix": "CIS"},
-    "SOC2": {"name": "SOC 2 Type II", "prefix": "SOC2"},
-    "ISO27001": {"name": "ISO/IEC 27001:2022", "prefix": "ISO27001"},
-    "NIST-CSF": {"name": "NIST Cybersecurity Framework", "prefix": "NIST-CSF"},
+FRAMEWORKS: dict[str, dict[str, Any]] = {
+    "CIS":      {"name": "CIS Benchmark",            "prefixes": ("CIS",)},
+    "SOC2":     {"name": "SOC 2 Type II",            "prefixes": ("SOC2", "SOC 2")},
+    "ISO27001": {"name": "ISO/IEC 27001:2022",       "prefixes": ("ISO27001", "ISO-27001", "ISO/IEC 27001", "ISO 27001")},
+    # NIST framework rolls up CSF, SP 800-53, and SP 800-63 — many SaaS rule
+    # sets only carry 800-53 or 800-63 references, so we treat any NIST mapping
+    # as in-scope for the NIST CSF column. Without this, the column would show
+    # near-zero coverage even when the rules are clearly NIST-aligned.
+    "NIST-CSF": {"name": "NIST Cybersecurity Framework", "prefixes": ("NIST-CSF", "NIST CSF", "NIST-800", "NIST 800", "NIST-")},
 }
 
 
@@ -62,12 +66,18 @@ class ComplianceEngine:
             Rule.is_active.is_(True),
         ).all()
 
+        prefixes: tuple[str, ...] = meta["prefixes"]
         if framework == "CIS":
             # CIS rules are identified by their ID prefix, not compliance_mapping
             mapped = [r for r in rules if r.id.startswith("CIS-")]
         else:
-            prefix = meta["prefix"]
-            mapped = [r for r in rules if any(m.startswith(prefix) for m in _parse_mappings(r.compliance_mapping))]
+            mapped = [
+                r for r in rules
+                if any(
+                    any(m.startswith(p) for p in prefixes)
+                    for m in _parse_mappings(r.compliance_mapping)
+                )
+            ]
 
         total = len(mapped)
         if total == 0:
