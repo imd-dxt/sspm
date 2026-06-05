@@ -1,5 +1,5 @@
 import { useMutation, useQuery, type UseQueryResult } from '@tanstack/react-query'
-import { get, post } from './client'
+import { get, post, downloadAuthed } from './client'
 
 // ── Legacy overview types (GET /) ─────────────────────────────────────────────
 
@@ -164,11 +164,14 @@ export function useLatestReport(framework: string): UseQueryResult<StoredReport 
   })
 }
 
-export function downloadFullPostureReport(): void {
-  const link = document.createElement('a')
-  link.href = '/api/v1/compliance/report/full-posture'
-  link.download = `sspm_full_posture_${new Date().toISOString().slice(0, 10)}.pdf`
-  link.click()
+export async function downloadFullPostureReport(): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10)
+  await downloadAuthed('/compliance/report/full-posture', `sspm_full_posture_${today}.pdf`)
+}
+
+/** Download a pre-generated compliance report by ID (uses JWT auth). */
+export async function downloadReportById(reportId: string, filename: string): Promise<void> {
+  await downloadAuthed(`/compliance/reports/${reportId}/pdf`, filename)
 }
 
 // ── AI Assistant ──────────────────────────────────────────────────────────────

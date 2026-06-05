@@ -15,11 +15,87 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database.models import Connector, Finding, NormalizedEntity
+from pydantic import BaseModel, Field
+
+from database.models import AppSetting, Connector, Finding, NormalizedEntity
 from database.session import get_db
 
 router = APIRouter(prefix="/identities", tags=["identities"])
 DB = Annotated[Session, Depends(get_db)]
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+_SETTINGS_KEY = "identity_settings"
+
+_DEFAULT_SETTINGS: dict[str, Any] = {
+    "internal_email_domains": [],   # e.g. ["hps.com", "acme.com"] — emails NOT in here = external
+    "inactive_user_days":     90,   # flag users not seen for N days (informational)
+    "extra_admin_roles":      [],   # extra role names to treat as admin (case-insensitive)
+    "flag_external_users":    True, # show "external" badge in the UI
+    "alert_on_new_admin":     False,
+}
+
+
+class IdentitySettings(BaseModel):
+    internal_email_domains: list[str] = Field(default_factory=list)
+    inactive_user_days:     int       = Field(default=90, ge=0, le=3650)
+    extra_admin_roles:      list[str] = Field(default_factory=list)
+    flag_external_users:    bool      = True
+    alert_on_new_admin:     bool      = False
+
+
+def _load_settings(db: Session) -> dict[str, Any]:
+    row = db.query(AppSetting).filter(AppSetting.key == _SETTINGS_KEY).first()
+    merged = dict(_DEFAULT_SETTINGS)
+    if row and isinstance(row.value, dict):
+        merged.update(row.value)
+    return merged
+
+
+@router.get("/settings", response_model=IdentitySettings)
+def get_identity_settings(db: DB) -> dict[str, Any]:
+    """Return the current admin-tunable identity settings."""
+    return _load_settings(db)
+
+
+@router.put("/settings", response_model=IdentitySettings)
+def update_identity_settings(payload: IdentitySettings, db: DB) -> dict[str, Any]:
+    """Replace the identity settings. Affects external-user detection,
+    admin role matching, and other identity heuristics on the next request."""
+    # Normalize domain list — lowercase + strip leading @ + dedupe
+    domains: list[str] = []
+    for d in payload.internal_email_domains:
+        d = (d or "").strip().lower().lstrip("@")
+        if d and d not in domains:
+            domains.append(d)
+    roles = [r.strip().lower() for r in payload.extra_admin_roles if r and r.strip()]
+
+    value = {
+        "internal_email_domains": domains,
+        "inactive_user_days":     payload.inactive_user_days,
+        "extra_admin_roles":      list(dict.fromkeys(roles)),
+        "flag_external_users":    payload.flag_external_users,
+        "alert_on_new_admin":     payload.alert_on_new_admin,
+    }
+
+    row = db.query(AppSetting).filter(AppSetting.key == _SETTINGS_KEY).first()
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=_SETTINGS_KEY, value=value))
+    db.commit()
+    return value
+
+
+def _is_external_email(email: str | None, internal_domains: list[str]) -> bool:
+    if not email or not internal_domains:
+        return False
+    e = email.lower().strip()
+    if "@" not in e:
+        return False
+    domain = e.split("@", 1)[1]
+    return not any(domain == d or domain.endswith("." + d) for d in internal_domains)
 
 _ADMIN_ROLES = frozenset({
     "admin", "owner", "administrator", "global administrator",
@@ -28,9 +104,13 @@ _ADMIN_ROLES = frozenset({
 })
 
 
-def _role_is_admin(role: str) -> bool:
+def _role_is_admin(role: str, extra_roles: list[str] | None = None) -> bool:
     r = role.lower()
-    return any(a in r or r in a for a in _ADMIN_ROLES)
+    if any(a in r or r in a for a in _ADMIN_ROLES):
+        return True
+    if extra_roles and any(a == r or a in r for a in extra_roles):
+        return True
+    return False
 
 
 def _is_admin_entity(entity: NormalizedEntity) -> bool:
@@ -294,10 +374,21 @@ def get_identity_summary(
         total_users = len(users)
         total_admins = len(direct_admin_ids | perm_admin_ids)
 
+    # Count external users using the configured internal-domain list
+    settings = _load_settings(db)
+    internal_domains: list[str] = settings.get("internal_email_domains") or []
+    external_count = 0
+    if internal_domains and users:
+        external_count = sum(
+            1 for u in users
+            if _is_external_email(u.email, internal_domains)
+        )
+
     return {
         "total_users": total_users,
         "total_admins": total_admins,
         "users_at_risk": len(at_risk_users),
+        "external_users": external_count,
         "total_resources": resource_count,
     }
 
@@ -338,6 +429,21 @@ def list_identity_users(
         fq = fq.filter(Finding.connector_id == connector_id)
     finding_counts: dict[str, int] = dict(fq.group_by(Finding.resource_identifier).all())
 
+    # Apply admin-configured settings: internal email domains + extra admin roles
+    settings = _load_settings(db)
+    internal_domains: list[str] = settings.get("internal_email_domains") or []
+    extra_admin_roles: list[str] = settings.get("extra_admin_roles") or []
+
+    if extra_admin_roles:
+        # Re-evaluate perm_admin_ids with the configured extra roles
+        for p in perms:
+            d = p.data_json or {}
+            role = d.get("role") or ""
+            if _role_is_admin(role, extra_admin_roles):
+                grantee = d.get("grantee_id") or d.get("subject_id", "")
+                if grantee:
+                    perm_admin_ids.add(grantee)
+
     if not users:
         result = _synthesize_users_from_perms(
             perms, perm_admin_ids, user_resource_ids, user_resources, finding_counts
@@ -351,6 +457,13 @@ def list_identity_users(
             fc = _user_finding_count(pid, username, u.email, user_resource_ids, finding_counts)
             is_admin = _is_admin_entity(u) or pid in perm_admin_ids
 
+            # External detection: prefer the configured domain list; fall back to
+            # whatever the connector already flagged via data_json.is_external.
+            if internal_domains:
+                is_external = _is_external_email(u.email, internal_domains)
+            else:
+                is_external = bool(d.get("is_external", False))
+
             result.append({
                 "id": u.id,
                 "platform_id": pid,
@@ -358,7 +471,7 @@ def list_identity_users(
                 "display_name": d.get("display_name") or username,
                 "email": u.email,
                 "is_active": d.get("is_active", True),
-                "is_external": d.get("is_external", False),
+                "is_external": is_external,
                 "is_admin": is_admin,
                 "finding_count": fc,
                 "resource_count": len(user_resources.get(pid, [])),

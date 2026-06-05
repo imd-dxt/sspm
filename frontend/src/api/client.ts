@@ -117,6 +117,42 @@ export async function del<T>(path: string): Promise<T> {
   return parseResponse<T>(res)
 }
 
+/**
+ * Authenticated file download. Fetches with the JWT header, then triggers
+ * the browser download via a Blob URL. Needed because <a href="..."> cannot
+ * attach an Authorization header — the server would return 401 and the
+ * browser would show "file is not available".
+ */
+export async function downloadAuthed(path: string, filename: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { ...authHeaders() },
+  })
+  if (res.status === 401) {
+    handleUnauthorized(res.url)
+    throw new ApiError(401, 'Session expired. Please log in again.', null)
+  }
+  if (!res.ok) {
+    let detail = `Download failed (${res.status})`
+    try {
+      const body = await res.json()
+      if (typeof body === 'object' && body !== null && 'detail' in body) {
+        detail = String((body as { detail: unknown }).detail)
+      }
+    } catch { /* body wasn't JSON */ }
+    throw new ApiError(res.status, detail, null)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  // Defer revoke so the browser has time to start the download
+  setTimeout(() => URL.revokeObjectURL(url), 4000)
+}
+
 /** Direct login call — uses no auth header (pre-auth) */
 export async function loginRequest(username: string, password: string): Promise<{ access_token: string; username: string; expires_in: number }> {
   const res = await fetch(`${BASE}/auth/login`, {

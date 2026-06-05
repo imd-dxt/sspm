@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react'
 import PlatformLogo from '../components/shared/PlatformLogo'
 import { useIdentityPlatforms } from '../api/identities'
 import { platformLabel, formatRelative } from '../lib/utils'
+import IdentitySettingsPanel from '../components/identities/IdentitySettingsPanel'
 
 const TABLE_SKELETONS = ['sk-a', 'sk-b', 'sk-c']
 
@@ -18,6 +19,9 @@ export default function Identities() {
           Unified view of users and access across your connected SaaS platforms.
         </p>
       </div>
+
+      {/* Admin settings panel (collapsible) */}
+      <IdentitySettingsPanel />
 
       {isLoading && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>

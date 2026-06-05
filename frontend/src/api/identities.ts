@@ -1,5 +1,5 @@
-import { useQuery, type UseQueryResult } from '@tanstack/react-query'
-import { get } from './client'
+import { useQuery, useMutation, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { get, put } from './client'
 import type {
   IdentityPlatform,
   IdentitySummary,
@@ -88,6 +88,37 @@ export function useFindingsByResource(
       }),
     enabled: !!platform,
     refetchInterval: 60_000,
+  })
+}
+
+export interface IdentitySettings {
+  internal_email_domains: string[]
+  inactive_user_days:     number
+  extra_admin_roles:      string[]
+  flag_external_users:    boolean
+  alert_on_new_admin:     boolean
+}
+
+export const IDENTITY_SETTINGS_KEY = ['identity-settings'] as const
+
+export function useIdentitySettings(): UseQueryResult<IdentitySettings> {
+  return useQuery({
+    queryKey: IDENTITY_SETTINGS_KEY,
+    queryFn: () => get<IdentitySettings>('/identities/settings'),
+  })
+}
+
+export function useUpdateIdentitySettings() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (payload: IdentitySettings) =>
+      put<IdentitySettings>('/identities/settings', payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: IDENTITY_SETTINGS_KEY })
+      // External-user counts depend on the new domain list
+      void queryClient.invalidateQueries({ queryKey: ['identity-summary'] })
+      void queryClient.invalidateQueries({ queryKey: ['identity-users'] })
+    },
   })
 }
 

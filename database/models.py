@@ -221,6 +221,20 @@ class ComplianceReport(Base):
     frameworks_assessed: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
 
+# ── AppSetting ────────────────────────────────────────────────────────────────
+
+class AppSetting(Base):
+    """Simple key-value settings store (admin-tunable platform behavior)."""
+    __tablename__ = "app_settings"
+
+    key:        Mapped[str] = mapped_column(String(128), primary_key=True)
+    value:      Mapped[Any] = mapped_column(JSONB, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        server_default=func.now(), onupdate=func.now(),
+    )
+
+
 # ── ActivityLog ───────────────────────────────────────────────────────────────
 
 class ActivityLog(Base):

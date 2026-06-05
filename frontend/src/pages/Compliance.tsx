@@ -7,6 +7,7 @@ import {
   useComplianceReports,
   useGenerateReport,
   downloadFullPostureReport,
+  downloadReportById,
   type ComplianceStandard,
   type PlatformScore,
   type StoredReport,
@@ -15,8 +16,6 @@ import { useConnectors } from '../api/connectors'
 import { ScoreGauge } from '../components/compliance/ScoreGauge'
 import { TrendChart } from '../components/compliance/TrendChart'
 import { formatRelative } from '../lib/utils'
-
-const PDF_BASE = '/api/v1'
 
 const RADIAL_PALETTE = [
   '#6366f1', '#22c55e', '#f59e0b', '#ef4444',
@@ -55,23 +54,23 @@ function FrameworkCard({ standard, latestReport }: Readonly<{ standard: Complian
   const generate = useGenerateReport()
 
   function handleDownload() {
-    // If a pre-generated report exists (from post-sync background task), download it directly
+    // If a pre-generated report exists, download it via authenticated fetch
     if (latestReport) {
-      const link = document.createElement('a')
-      link.href = `${PDF_BASE}/compliance/reports/${latestReport.id}/pdf`
-      link.download = `compliance_all_${standard.id}_${latestReport.id}.pdf`
-      link.click()
+      void downloadReportById(
+        latestReport.id,
+        `compliance_all_${standard.id}_${latestReport.id}.pdf`,
+      )
       return
     }
-    // Otherwise generate now (all connected platforms)
+    // Otherwise generate it, then download the new file
     generate.mutate(
       { platform: 'all', framework: standard.id, with_ai_narrative: true },
       {
         onSuccess: (report) => {
-          const link = document.createElement('a')
-          link.href = `${PDF_BASE}/compliance/reports/${report.id}/pdf`
-          link.download = `compliance_all_${standard.id}_${report.id}.pdf`
-          link.click()
+          void downloadReportById(
+            report.id,
+            `compliance_all_${standard.id}_${report.id}.pdf`,
+          )
         },
       },
     )
@@ -183,7 +182,7 @@ function OverallStrip({ score, standards }: Readonly<{ score: number; standards:
       </div>
       <div style={{ marginLeft: 'auto' }}>
         <button
-          onClick={downloadFullPostureReport}
+          onClick={() => { void downloadFullPostureReport() }}
           className="btn-primary btn-sm"
           title="Download full GRC posture report (all frameworks × all platforms)"
         >
