@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ChevronRight } from 'lucide-react'
+import { ChevronRight, Settings } from 'lucide-react'
 import PlatformLogo from '../components/shared/PlatformLogo'
 import { useIdentityPlatforms } from '../api/identities'
 import { platformLabel, formatRelative } from '../lib/utils'
@@ -10,18 +11,40 @@ const TABLE_SKELETONS = ['sk-a', 'sk-b', 'sk-c']
 export default function Identities() {
   const navigate = useNavigate()
   const { data: platforms, isLoading } = useIdentityPlatforms()
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <div>
-        <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>SaaS Identities</h1>
-        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-          Unified view of users and access across your connected SaaS platforms.
-        </p>
+      {/* Header — title on the left, small Settings button on the right */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>SaaS Identities</h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+            Unified view of users and access across your connected SaaS platforms.
+          </p>
+        </div>
+        <button
+          onClick={() => setSettingsOpen(true)}
+          title="Identity settings"
+          aria-label="Identity settings"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 12px', borderRadius: 8,
+            fontSize: '0.8125rem', fontWeight: 500,
+            border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text-muted)', cursor: 'pointer',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+        >
+          <Settings size={14} />
+          Settings
+        </button>
       </div>
 
-      {/* Admin settings panel (collapsible) */}
-      <IdentitySettingsPanel />
+      {/* Admin settings — opens as modal */}
+      <IdentitySettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       {isLoading && (
         <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
