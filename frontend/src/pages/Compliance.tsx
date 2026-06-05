@@ -57,7 +57,7 @@ function FrameworkCard({ standard, latestReport }: Readonly<{ standard: Complian
     // If a pre-generated report exists, download it via authenticated fetch
     if (latestReport) {
       void downloadReportById(
-        latestReport.id,
+        String(latestReport.id),
         `compliance_all_${standard.id}_${latestReport.id}.pdf`,
       )
       return
@@ -68,7 +68,7 @@ function FrameworkCard({ standard, latestReport }: Readonly<{ standard: Complian
       {
         onSuccess: (report) => {
           void downloadReportById(
-            report.id,
+            String(report.id),
             `compliance_all_${standard.id}_${report.id}.pdf`,
           )
         },
