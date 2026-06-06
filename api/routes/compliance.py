@@ -752,6 +752,34 @@ async def ask_compliance(req: AskRequest, db: DB) -> AskResponse:
         except Exception:
             pass
 
+    # Section 6.5: Posture score (impact-weighted) — separate from compliance %.
+    try:
+        from core.posture_engine import _compute_score, _SEVERITY_WEIGHTS  # type: ignore
+    except Exception:
+        # Use local impact-weighted formula identical to /posture/score
+        _SEVERITY_WEIGHTS = {"critical": 10.0, "high": 7.0, "medium": 4.0, "low": 1.0}
+        def _compute_score(findings):  # noqa: E306
+            if not findings:
+                return 100.0
+            total_w = sum(_SEVERITY_WEIGHTS.get(f.severity, 1.0) *
+                          (f.impact_factor if f.impact_factor is not None else 0.5)
+                          for f in findings)
+            max_possible = len(findings) * 10.0
+            return round(max(0.0, 100.0 - (total_w / max_possible) * 100.0), 1)
+    try:
+        open_findings = db.query(Finding).filter(Finding.status == "open").all()
+        posture_score = _compute_score(open_findings)
+        sections.append(
+            f"=== POSTURE SCORE (impact-weighted, 0-100) ===\n"
+            f"Current posture score: {posture_score}\n"
+            f"  Formula: 100 - (Σ severity_weight × impact_factor / max_possible × 100)\n"
+            f"  Based on: {len(open_findings)} open finding(s)\n"
+            f"  Severity weights: critical=10, high=7, medium=4, low=1"
+        )
+        ctx_lines.append(f"Posture score (impact-weighted): {posture_score}")
+    except Exception as exc:
+        log.warning("ask: posture score: %s", exc)
+
     # Section 7: Top open findings (top 10 by severity then last_detected).
     # Without this, SSPMer can't answer "what are my top 5 critical findings".
     try:
@@ -1386,36 +1414,68 @@ def _context_aware_fallback(question: str, ctx_lines: list[str]) -> str:
     """
     When Ollama is unavailable, answer using the compliance context that was
     already fetched from the DB, so score/posture questions return real numbers.
+
+    "Posture score" (impact-weighted) and "compliance score" (control-based)
+    are intentionally different values — match them separately.
     """
     q = question.lower()
 
-    score_keywords = {"score", "posture", "percentage", "percent", "how am i", "how are we",
-                      "standing", "overall", "compliance level", "status", "tell me"}
     fw_map = {
         "cis": "CIS Benchmark", "soc2": "SOC 2", "soc 2": "SOC 2",
         "iso27001": "ISO/IEC 27001", "iso 27001": "ISO/IEC 27001", "nist": "NIST",
     }
 
-    if ctx_lines and any(kw in q for kw in score_keywords):
-        # Try to match a specific framework first
-        for kw, fw_label in fw_map.items():
-            if kw in q:
-                matching = [l.strip() for l in ctx_lines if fw_label in l]
-                if matching:
-                    return f"Your {fw_label} compliance posture:\n\n" + "\n".join(matching)
+    if not ctx_lines:
+        return _static_compliance_answer(question)
 
-        # Return full posture summary
-        lines = [l.strip() for l in ctx_lines if l.strip()]
-        if lines:
-            return "Here is your current compliance posture:\n\n" + "\n".join(lines)
+    # 1) Specific "posture score" question → return the impact-weighted line.
+    if "posture" in q and "score" in q:
+        posture_line = next(
+            (l.strip() for l in ctx_lines if l.lower().startswith("posture score")),
+            None,
+        )
+        if posture_line:
+            return (
+                f"Your {posture_line.split(':', 1)[0].lower()} is "
+                f"**{posture_line.split(':', 1)[1].strip()}**. "
+                "This is a severity-weighted score over your open findings "
+                "(critical=10, high=7, medium=4, low=1, scaled by AI-assigned impact factor)."
+            )
 
-    # Framework-specific questions without explicit score ask
-    if ctx_lines:
-        for kw, fw_label in fw_map.items():
-            if kw in q:
-                matching = [l.strip() for l in ctx_lines if fw_label in l]
-                if matching:
-                    return f"{fw_label} status: " + " | ".join(matching)
+    # 2) Specific "compliance score" question → return the overall compliance %.
+    if ("compliance" in q and "score" in q) or "overall" in q or "compliance level" in q:
+        compliance_line = next(
+            (l.strip() for l in ctx_lines if "overall compliance score" in l.lower()),
+            None,
+        )
+        if compliance_line:
+            return (
+                f"Your **{compliance_line}**. "
+                "This is the share of assessed controls that pass across all 4 frameworks."
+            )
+
+    # 3) Framework-specific question → return that framework's line(s).
+    for kw, fw_label in fw_map.items():
+        if kw in q:
+            matching = [l.strip() for l in ctx_lines if fw_label in l]
+            if matching:
+                return f"Your {fw_label} posture:\n\n" + "\n".join(matching)
+
+    # 4) Generic "score / status / how are we" question → show both scores.
+    generic_score_keywords = {
+        "score", "percentage", "percent", "how am i", "how are we",
+        "standing", "status", "tell me",
+    }
+    if any(kw in q for kw in generic_score_keywords):
+        posture_line   = next((l.strip() for l in ctx_lines if l.lower().startswith("posture score")), None)
+        compliance_line = next((l.strip() for l in ctx_lines if "overall compliance score" in l.lower()), None)
+        parts = []
+        if posture_line:
+            parts.append(f"• {posture_line}")
+        if compliance_line:
+            parts.append(f"• {compliance_line}")
+        if parts:
+            return "Here are your current scores:\n\n" + "\n".join(parts)
 
     return _static_compliance_answer(question)
 

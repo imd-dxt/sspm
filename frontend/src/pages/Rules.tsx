@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
-import { Search, ChevronDown, ChevronRight, BookOpen } from 'lucide-react'
+import { Search, ChevronDown, ChevronRight, BookOpen, ShieldPlus } from 'lucide-react'
 import { useRules } from '../api/rules'
 import SeverityBadge from '../components/findings/SeverityBadge'
 import { platformLabel } from '../lib/utils'
 import type { Rule } from '../api/types'
+import CustomPolicyModal from '../components/rules/CustomPolicyModal'
 
 function RuleRow({ rule }: Readonly<{ rule: Rule }>) {
   const [expanded, setExpanded] = useState(false)
@@ -131,6 +132,7 @@ export default function Rules() {
   const [platformFilter, setPlatformFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState('')
   const [referentialFilter, setReferentialFilter] = useState('')
+  const [customModalOpen, setCustomModalOpen] = useState(false)
 
   const { data, isLoading, isError, refetch } = useRules()
 
@@ -164,6 +166,38 @@ export default function Rules() {
   return (
     <div>
       {/* Stats + filter row */}
+      {/* Custom policy modal */}
+      <CustomPolicyModal open={customModalOpen} onClose={() => setCustomModalOpen(false)} />
+
+      {/* Heading + Custom Policy CTA */}
+      <div style={{
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+        gap: 16, marginBottom: 18,
+      }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <h1 style={{ fontSize: '1.375rem', fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
+            Detection rules
+          </h1>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+            Shipped CIS, SOC 2, ISO 27001, and NIST CSF baselines — plus your own custom policies for org-specific risks.
+          </p>
+        </div>
+        <button
+          onClick={() => setCustomModalOpen(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 14px', borderRadius: 8,
+            fontSize: '0.8125rem', fontWeight: 600,
+            border: 'none', background: 'var(--accent)', color: '#fff',
+            cursor: 'pointer', flexShrink: 0,
+          }}
+          title="Create a new policy tailored to your risk appetite"
+        >
+          <ShieldPlus size={14} />
+          New custom policy
+        </button>
+      </div>
+
       <div className="filter-bar">
         {!isLoading && data && (
           <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', flexShrink: 0 }}>
