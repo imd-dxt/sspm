@@ -277,10 +277,15 @@ def _user_finding_count(
     user_resource_ids: dict[str, set[str]],
     finding_counts: dict[str, int],
 ) -> int:
-    """Sum open findings directly on the user plus findings on their resources."""
-    direct = finding_counts.get(pid, 0) or finding_counts.get(username, 0)
-    if email:
-        direct = direct or finding_counts.get(email, 0)
+    """
+    Sum open findings directly on the user plus findings on resources the
+    user has access to. Detection rules return one of (platform_id, username,
+    email) as the resource_identifier — we try all three to catch them all.
+    """
+    direct = 0
+    for key in (pid, username, email):
+        if key:
+            direct += finding_counts.get(key, 0)
     indirect = sum(finding_counts.get(r, 0) for r in user_resource_ids.get(pid, set()))
     return direct + indirect
 

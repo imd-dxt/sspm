@@ -50,6 +50,63 @@ _EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 _UUID_RE  = re.compile(
     r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I
 )
+_IP_RE = re.compile(
+    r"\b(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}\b"
+)
+
+# ── DeepSeek policy enforcement constants ────────────────────────────────────
+# These caps apply to EVERY outbound DeepSeek call. A call that exceeds them
+# is BLOCKED before the network request is made, and the attempt is logged.
+MAX_DEEPSEEK_PROMPT_CHARS = 12000  # ~3000 tokens — generous but bounded
+PII_PATTERNS = (
+    ("email", _EMAIL_RE),
+    ("uuid",  _UUID_RE),
+    ("ip",    _IP_RE),
+)
+
+
+def _count_pii(text: str) -> dict[str, int]:
+    """Return {pattern_name: count} of PII matches in the raw text."""
+    return {name: len(rx.findall(text)) for name, rx in PII_PATTERNS}
+
+
+def _audit_genai_call(
+    provider: str,
+    task: str,
+    model: str | None,
+    prompt: str,
+    response: str | None,
+    pii_before: dict[str, int],
+    tokens_substituted: int,
+    latency_ms: int | None,
+    blocked: bool,
+    block_reason: str | None = None,
+) -> None:
+    """Write an audit row for an outbound cloud LLM call. Best-effort — never raises."""
+    try:
+        from database.models import GenAIAuditLog
+        from database.session import SessionLocal
+        db = SessionLocal()
+        try:
+            db.add(GenAIAuditLog(
+                provider=provider,
+                task=task,
+                model=model,
+                prompt_chars=len(prompt),
+                response_chars=len(response) if response else 0,
+                pii_emails=pii_before.get("email", 0),
+                pii_uuids=pii_before.get("uuid", 0),
+                pii_ips=pii_before.get("ip", 0),
+                tokens_substituted=tokens_substituted,
+                blocked=blocked,
+                block_reason=block_reason,
+                latency_ms=latency_ms,
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as exc:
+        log.warning("genai_audit_write_failed: %s", exc)
 
 
 class LLMRouter:
@@ -128,11 +185,62 @@ class LLMRouter:
             log.warning("ollama_call_failed: %s", exc)
             return None
 
-    def call_deepseek(self, prompt: str, system: str | None = None,
-                      timeout: float | None = None) -> str | None:
+    def call_deepseek(
+        self,
+        prompt: str,
+        system: str | None = None,
+        timeout: float | None = None,
+        task: str = "unspecified",
+        tokens_substituted: int = 0,
+    ) -> str | None:
+        """
+        Outbound call to the DeepSeek cloud LLM, with policy enforcement.
+
+        Policy (enforced before the request is made):
+          • Prompt size <= MAX_DEEPSEEK_PROMPT_CHARS
+          • PII patterns (raw email, UUID, IP) counted in the prompt; any non-zero
+            count is treated as a leak signal AND BLOCKS the call. Sanitised
+            prompts (post token-substitution) should have zero PII matches.
+          • Every call — successful, failed, or blocked — is written to
+            genai_audit_logs for review.
+        """
         if not self.deepseek_key:
             log.warning("deepseek_api_key not configured")
             return None
+
+        # ── Pre-flight policy checks ──────────────────────────────────────────
+        pii_before = _count_pii(prompt)
+        leaked_pii_total = sum(pii_before.values())
+
+        if leaked_pii_total > 0:
+            block_reason = (
+                f"PII detected in prompt (emails={pii_before['email']}, "
+                f"uuids={pii_before['uuid']}, ips={pii_before['ip']}). "
+                "Sanitisation must precede DeepSeek call."
+            )
+            log.warning("deepseek_call_blocked: %s", block_reason)
+            _audit_genai_call(
+                provider="deepseek", task=task, model=self.deepseek_model,
+                prompt=prompt, response=None, pii_before=pii_before,
+                tokens_substituted=tokens_substituted, latency_ms=None,
+                blocked=True, block_reason=block_reason,
+            )
+            return None
+
+        if len(prompt) > MAX_DEEPSEEK_PROMPT_CHARS:
+            block_reason = (
+                f"prompt size {len(prompt)} > policy max {MAX_DEEPSEEK_PROMPT_CHARS}"
+            )
+            log.warning("deepseek_call_blocked: %s", block_reason)
+            _audit_genai_call(
+                provider="deepseek", task=task, model=self.deepseek_model,
+                prompt=prompt, response=None, pii_before=pii_before,
+                tokens_substituted=tokens_substituted, latency_ms=None,
+                blocked=True, block_reason=block_reason,
+            )
+            return None
+
+        # ── Network call ──────────────────────────────────────────────────────
         t = timeout or self.deepseek_timeout
         messages: list[dict] = []
         if system:
@@ -148,15 +256,29 @@ class LLMRouter:
             with httpx.Client(timeout=t) as client:
                 resp = client.post(self.deepseek_url, json=payload, headers=headers)
                 resp.raise_for_status()
-            latency = round((time.monotonic() - t0) * 1000)
+            latency_ms = round((time.monotonic() - t0) * 1000)
             data = resp.json()
             result = data["choices"][0]["message"]["content"].strip()
             tokens = data.get("usage", {}).get("total_tokens")
-            log.info("llm_call provider=deepseek model=%s latency_ms=%d tokens=%s privacy=anonymised",
-                     self.deepseek_model, latency, tokens)
+            log.info(
+                "llm_call provider=deepseek task=%s model=%s latency_ms=%d tokens=%s privacy=anonymised",
+                task, self.deepseek_model, latency_ms, tokens,
+            )
+            _audit_genai_call(
+                provider="deepseek", task=task, model=self.deepseek_model,
+                prompt=prompt, response=result, pii_before=pii_before,
+                tokens_substituted=tokens_substituted, latency_ms=latency_ms,
+                blocked=False,
+            )
             return result or None
         except Exception as exc:
-            log.warning("deepseek_call_failed: %s", exc)
+            log.warning("deepseek_call_failed task=%s: %s", task, exc)
+            _audit_genai_call(
+                provider="deepseek", task=task, model=self.deepseek_model,
+                prompt=prompt, response=None, pii_before=pii_before,
+                tokens_substituted=tokens_substituted, latency_ms=None,
+                blocked=False, block_reason=f"network_error: {exc}",
+            )
             return None
 
     # ── Main entry point ──────────────────────────────────────────────────────
@@ -174,7 +296,7 @@ class LLMRouter:
             if provider == "deepseek":
                 sanitised, token_map = self.sanitise(data)
                 prompt = self._build_prompt(task, sanitised)
-                raw = self.call_deepseek(prompt)
+                raw = self.call_deepseek(prompt, task=task, tokens_substituted=len(token_map))
                 if raw is None:
                     raw = self.call_ollama(prompt)
                 if raw is None:
@@ -228,7 +350,7 @@ Write a 3-paragraph executive summary:
 3. Recommended strategic actions for the next 30 days
 
 Tone: confident, factual, non-alarmist. Max 200 words total."""
-        result = self.call_deepseek(prompt)
+        result = self.call_deepseek(prompt, task="executive_summary")
         if result is None:
             result = self.call_ollama(prompt)
         return result or "[Executive summary unavailable — configure DeepSeek or Ollama]"
@@ -242,7 +364,7 @@ Describe a realistic 3-sentence attack scenario that exploits this control failu
 Focus on: initial access → lateral movement → impact.
 Do NOT reference any specific organisation. Use generic terms only.
 No markdown headers. Direct prose only."""
-        result = self.call_deepseek(prompt)
+        result = self.call_deepseek(prompt, task="exploitation_scenario")
         if result is None:
             result = self.call_ollama(prompt)
         return result or f"[Exploitation scenario unavailable for {control_id}]"
@@ -304,7 +426,7 @@ Write 3 concise bullet points (max 60 words total):
 • Estimated remediation effort
 
 No preamble, no headers, plain prose under each bullet."""
-        result = self.call_deepseek(prompt)
+        result = self.call_deepseek(prompt, task="impact_analysis")
         if result is None:
             # Fall back to Ollama for the full narrative if DeepSeek is unavailable
             result = self.call_ollama(prompt)
@@ -317,7 +439,7 @@ Score trend data (anonymised):
 
 Write 2 sentences summarising the trend direction and its significance.
 Focus on improving vs declining platforms. Max 50 words."""
-        result = self.call_deepseek(prompt)
+        result = self.call_deepseek(prompt, task="trend_narrative")
         if result is None:
             result = self.call_ollama(prompt)
         return result or "[Trend narrative unavailable]"

@@ -237,6 +237,34 @@ class AppSetting(Base):
 
 # ── ActivityLog ───────────────────────────────────────────────────────────────
 
+class GenAIAuditLog(Base):
+    """
+    Audit trail for every outbound call to a cloud LLM (DeepSeek).
+
+    Captures: timestamp, task name, provider, prompt size, tokens substituted,
+    PII pattern counts (email/UUID/IP), response size, and whether the call
+    was blocked by policy. Local Ollama calls are NOT logged here — they don't
+    leave the server.
+    """
+    __tablename__ = "genai_audit_logs"
+
+    id:              Mapped[int]      = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp:       Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    provider:        Mapped[str]      = mapped_column(String(32),  nullable=False)  # deepseek, anthropic, etc.
+    task:            Mapped[str]      = mapped_column(String(64),  nullable=False)
+    model:           Mapped[str | None] = mapped_column(String(64))
+    prompt_chars:    Mapped[int]      = mapped_column(Integer, nullable=False, default=0)
+    response_chars:  Mapped[int]      = mapped_column(Integer, nullable=False, default=0)
+    pii_emails:      Mapped[int]      = mapped_column(Integer, nullable=False, default=0)
+    pii_uuids:       Mapped[int]      = mapped_column(Integer, nullable=False, default=0)
+    pii_ips:         Mapped[int]      = mapped_column(Integer, nullable=False, default=0)
+    tokens_substituted: Mapped[int]   = mapped_column(Integer, nullable=False, default=0)
+    blocked:         Mapped[bool]     = mapped_column(Boolean, nullable=False, default=False)
+    block_reason:    Mapped[str | None] = mapped_column(String(256))
+    latency_ms:      Mapped[int | None] = mapped_column(Integer)
+    actor:           Mapped[str | None] = mapped_column(String(128))  # admin username if available
+
+
 class ActivityLog(Base):
     """Audit/activity log entry fetched from a SaaS connector during sync."""
     __tablename__ = "activity_logs"

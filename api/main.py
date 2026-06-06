@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from config.logging_config import configure_logging
 from config.settings import settings
 from api.auth import get_current_user
-from api.routes import auth, connectors, findings, rules, scan_runs, third_party_apps, identities, activity_logs, posture, compliance
+from api.routes import auth, connectors, findings, rules, scan_runs, third_party_apps, identities, activity_logs, posture, compliance, genai_security
 
 API_V1 = "/api/v1"
 
@@ -71,7 +71,8 @@ def _seed_rules() -> None:
         log.warning("rules_dir_not_found", rules_dir=str(rules_dir))
         return
 
-    yaml_files = list(rules_dir.glob("*.yaml"))
+    # Accept both .yaml and .yml — the DISA STIG file uses the short extension.
+    yaml_files = list(rules_dir.glob("*.yaml")) + list(rules_dir.glob("*.yml"))
     if not yaml_files:
         log.warning("no_rule_yaml_files", rules_dir=str(rules_dir))
         return
@@ -102,7 +103,14 @@ async def lifespan(application: FastAPI):
         scheduler = BackgroundScheduler()
         scheduler.add_job(_run_scheduled_syncs, "interval", minutes=1, id="auto_sync")
         scheduler.start()
-        log.info("scheduler_started")
+        # This log line confirms in production that the in-process scheduler
+        # is running. It does NOT depend on any admin being logged in — the
+        # scheduler is part of the API process itself.
+        log.info(
+            "scheduler_started",
+            tick_minutes=1,
+            note="auto_sync runs from inside the api process; survives all admin sessions",
+        )
         application.state.scheduler = scheduler
     except ImportError:
         log.warning("apscheduler_not_installed", extra={"hint": "pip install apscheduler"})
@@ -184,6 +192,7 @@ app.include_router(identities.router, prefix=API_V1, dependencies=_auth_dep)
 app.include_router(activity_logs.router, prefix=API_V1, dependencies=_auth_dep)
 app.include_router(posture.router, prefix=API_V1, dependencies=_auth_dep)
 app.include_router(compliance.router, prefix=API_V1, dependencies=_auth_dep)
+app.include_router(genai_security.router, prefix=API_V1, dependencies=_auth_dep)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

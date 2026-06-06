@@ -85,15 +85,6 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Bottom HPS brand */}
-        <div style={{
-          position: 'absolute', bottom: 28, left: 0, right: 0,
-          textAlign: 'center', zIndex: 1,
-        }}>
-          <p style={{ fontSize: '0.6875rem', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.08em' }}>
-            POWERED BY HPS
-          </p>
-        </div>
       </div>
 
       {/* ── Right panel: login form ────────────────────────────────────── */}
@@ -116,7 +107,7 @@ export default function Login() {
               Sign in
             </p>
             <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-              Administrator access — enter your credentials to continue.
+              Sign in to access the platform.
             </p>
           </div>
 
