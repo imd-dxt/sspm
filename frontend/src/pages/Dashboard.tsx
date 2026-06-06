@@ -423,19 +423,8 @@ function FindingsTrendCard({ scanRunsQ }: Readonly<{ scanRunsQ: ScanRunsQ }>) {
 type PrioritizedQ = ReturnType<typeof usePrioritizedActions>
 type ConnectorsQ  = ReturnType<typeof useConnectors>
 
-const SEVERITY_GAIN: Record<string, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 }
-
-function calcGain(a: { severity: string; impact_factor: number }, source: string | undefined, currentScore: number): number {
-  const room = 100 - currentScore
-  if (source === 'ollama' && a.impact_factor > 0) {
-    return Math.min(Math.round(a.impact_factor * 10), room)
-  }
-  return Math.min(SEVERITY_GAIN[a.severity] ?? 0, room)
-}
-
 function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
   const actions = q.data?.actions ?? []
-  const currentScore = q.data?.posture_score ?? 0
   let body: React.ReactNode
   if (q.isLoading) {
     body = (
@@ -452,7 +441,9 @@ function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
     body = (
       <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
         {actions.map((a, i) => {
-          const gain = calcGain(a, q.data?.source, currentScore)
+          // posture_gain comes from the API — computed live from open findings
+          // every call, so it stays accurate after every sync. Never hardcoded.
+          const gain = a.posture_gain ?? 0
           return (
             <li key={a.finding_id} style={{
               display: 'flex', alignItems: 'flex-start', gap: 12, padding: '10px 0',
@@ -475,12 +466,15 @@ function PrioritizedActionsCard({ q }: Readonly<{ q: PrioritizedQ }>) {
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{platformLabel(a.platform)}</span>
                 {gain > 0 && (
-                  <span style={{
-                    fontSize: '0.625rem', fontWeight: 700, padding: '2px 6px', borderRadius: 10,
-                    background: 'color-mix(in oklch, var(--ok) 12%, transparent)',
-                    color: 'var(--ok)',
-                  }}>
-                    +{gain} pts posture
+                  <span
+                    title="Estimated posture-score improvement if this finding is resolved"
+                    style={{
+                      fontSize: '0.625rem', fontWeight: 700, padding: '2px 6px', borderRadius: 10,
+                      background: 'color-mix(in oklch, var(--ok) 12%, transparent)',
+                      color: 'var(--ok)',
+                    }}
+                  >
+                    +{gain.toFixed(1)}% posture
                   </span>
                 )}
               </div>

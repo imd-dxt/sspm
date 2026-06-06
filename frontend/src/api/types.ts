@@ -243,6 +243,10 @@ export interface PrioritizedAction {
   impact_factor: number
   impact_summary: string
   recommended_action: string
+  /** Real percentage-point gain to the overall posture score if this action
+   *  is resolved. Computed live from open findings every API call — NOT
+   *  hardcoded. Updates after every sync. */
+  posture_gain: number
 }
 
 export interface PrioritizedActionsResponse {

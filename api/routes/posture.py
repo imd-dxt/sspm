@@ -100,7 +100,51 @@ def get_posture_score(
 _SEV_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
-def _deterministic_actions(findings: list[Finding], limit: int) -> list[dict]:
+def _posture_gain_for(
+    finding: Finding,
+    all_open: list[Finding],
+    current_score: float,
+) -> float:
+    """
+    Return the real percentage-point gain to the overall posture score that
+    would result from resolving this finding.
+
+    Posture score formula (identical to _compute_score above):
+        score = 100 - (Σ weight × impact_factor / (n × 10)) × 100
+
+    Removing finding F changes:
+        n → n - 1
+        Σ → Σ - (weight_F × impact_F)
+
+    The function returns score_after - score_before, clamped to [0, 100].
+    Recomputed live on every API call — never hard-coded.
+    """
+    n = len(all_open)
+    if n == 0:
+        return 0.0
+    if n == 1:
+        # Removing the only open finding takes the score to 100.
+        return round(max(0.0, 100.0 - current_score), 1)
+
+    total_weight_now = sum(
+        _SEVERITY_WEIGHTS.get(f.severity, 1.0)
+        * (f.impact_factor if f.impact_factor is not None else 0.5)
+        for f in all_open
+    )
+    f_contribution = (
+        _SEVERITY_WEIGHTS.get(finding.severity, 1.0)
+        * (finding.impact_factor if finding.impact_factor is not None else 0.5)
+    )
+    total_weight_after = total_weight_now - f_contribution
+    score_after = max(0.0, 100.0 - (total_weight_after / ((n - 1) * 10.0)) * 100.0)
+    return round(max(0.0, score_after - current_score), 1)
+
+
+def _deterministic_actions(
+    findings: list[Finding],
+    limit: int,
+    current_score: float | None = None,
+) -> list[dict]:
     """Rank findings by severity + impact_factor and return structured actions."""
     ranked = sorted(
         findings,
@@ -109,6 +153,10 @@ def _deterministic_actions(findings: list[Finding], limit: int) -> list[dict]:
             -(f.impact_factor if f.impact_factor is not None else 0.5),
         ),
     )
+    # Compute the current posture score once if the caller didn't pass it in.
+    if current_score is None:
+        current_score = _compute_score(findings)
+
     actions = []
     for i, f in enumerate(ranked[:limit], start=1):
         rule_name = (f.rule.name if f.rule else None) or f.rule_id or "Unknown rule"
@@ -123,6 +171,9 @@ def _deterministic_actions(findings: list[Finding], limit: int) -> list[dict]:
             "impact_factor": round(f.impact_factor if f.impact_factor is not None else 0.5, 2),
             "impact_summary": f.impact_explanation or f.description or "",
             "recommended_action": f.generated_remediation or (f.rule.remediation if f.rule else None) or "Review rule documentation.",
+            # Real percentage-point gain to the overall posture score if this
+            # action is resolved. Recomputed every call from live findings.
+            "posture_gain": _posture_gain_for(f, findings, current_score),
         })
     return actions
 
@@ -161,7 +212,7 @@ async def _try_ollama_actions(
     from core.llm_ollama import _ENABLED, _generate  # noqa: PLC0415
 
     if not _ENABLED or not findings:
-        return _deterministic_actions(findings, limit), "deterministic"
+        return _deterministic_actions(findings, limit, score), "deterministic"
 
     top = sorted(
         findings,
@@ -181,15 +232,28 @@ async def _try_ollama_actions(
         parsed: list[dict] = json.loads(raw[start : end + 1])
         if not isinstance(parsed, list):
             raise ValueError("Expected JSON array")
-        # Resolve finding_id back to real IDs using rank as index
+        # Resolve finding_id back to real IDs using rank as index AND attach
+        # the real posture_gain computed from the live data (Ollama doesn't
+        # know the formula, so we never trust whatever value it might invent).
+        by_id = {f.id: f for f in top}
         for item in parsed:
             rank = item.get("finding_id", 1)
             if isinstance(rank, int) and 1 <= rank <= len(top):
-                item["finding_id"] = top[rank - 1].id
+                fid = top[rank - 1].id
+                item["finding_id"] = fid
+            else:
+                fid = item.get("finding_id")
+            f = by_id.get(fid)
+            if f is not None:
+                item["posture_gain"] = _posture_gain_for(f, findings, score)
+                item.setdefault("impact_factor",
+                                round(f.impact_factor if f.impact_factor is not None else 0.5, 2))
+            else:
+                item["posture_gain"] = 0.0
         return parsed, "ollama"
     except (asyncio.TimeoutError, Exception) as exc:
         log.warning("Ollama prioritized actions failed: %s", exc)
-        return _deterministic_actions(findings, limit), "deterministic"
+        return _deterministic_actions(findings, limit, score), "deterministic"
 
 
 Platform = Annotated[str | None, Query(description="Filter by platform")]

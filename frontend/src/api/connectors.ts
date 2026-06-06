@@ -47,10 +47,22 @@ export function useSyncConnector() {
   return useMutation({
     mutationFn: (id: string) => post<ScanRun>(`/connectors/${id}/sync`),
     onSuccess: () => {
+      // After a sync, any cached value that depends on findings is stale.
+      // Invalidate broadly so posture-gain percentages, prioritized actions,
+      // compliance scores, identity counts, and the heatmap all refetch
+      // automatically without needing a page refresh.
       void queryClient.invalidateQueries({ queryKey: CONNECTORS_KEY })
       void queryClient.invalidateQueries({ queryKey: ['scan-runs'] })
       void queryClient.invalidateQueries({ queryKey: ['findings'] })
       void queryClient.invalidateQueries({ queryKey: ['findings-summary'] })
+      void queryClient.invalidateQueries({ queryKey: ['findings-by-category'] })
+      void queryClient.invalidateQueries({ queryKey: ['prioritized-actions'] })
+      void queryClient.invalidateQueries({ queryKey: ['posture-score'] })
+      void queryClient.invalidateQueries({ queryKey: ['compliance-scores'] })
+      void queryClient.invalidateQueries({ queryKey: ['compliance-report'] })
+      void queryClient.invalidateQueries({ queryKey: ['identity-summary'] })
+      void queryClient.invalidateQueries({ queryKey: ['identity-users'] })
+      void queryClient.invalidateQueries({ queryKey: ['identity-cross-platform-users'] })
     },
   })
 }
